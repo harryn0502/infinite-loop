@@ -32,3 +32,35 @@ export const getRunIcon = (runType: string): string => {
       return "▶️"; // Default
   }
 };
+
+/**
+ * Recursively truncates all string values in a JSON object/array.
+ * @param obj The object/array/value to process.
+ * @param maxLength The max length for string values.
+ * @returns The processed object/array/value.
+ */
+export const truncateJsonValues = (obj: any, maxLength: number = 100): any => {
+  // 1. If it's a string, truncate it
+  if (typeof obj === "string") {
+    return obj.length > maxLength ? obj.slice(0, maxLength) + "..." : obj;
+  }
+
+  // 2. If it's an array, map over its items and recurse
+  if (Array.isArray(obj)) {
+    return obj.map((item) => truncateJsonValues(item, maxLength));
+  }
+
+  // 3. If it's an object, create a new object and recurse on its values
+  if (obj !== null && typeof obj === "object") {
+    const newObj: Record<string, any> = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        newObj[key] = truncateJsonValues(obj[key], maxLength);
+      }
+    }
+    return newObj;
+  }
+
+  // 4. Return numbers, booleans, null, etc. as-is
+  return obj;
+};
