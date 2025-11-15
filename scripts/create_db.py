@@ -53,6 +53,7 @@ CREATE TABLE steps (
     -- binary flags indicating the type of step
     is_llm_call INTEGER,
     is_tool_call INTEGER,
+    is_chain_call INTEGER,
 
     -- LLM step fields (NULL for tool steps)
     prompt_text TEXT,
@@ -76,6 +77,17 @@ CREATE TABLE steps (
     tool_message_content TEXT,
     tool_cost REAL,
     tool_latency_ms INTEGER,
+    -- Chain step fields (for runs of type 'chain')
+    chain_name TEXT,
+    chain_status TEXT,
+    chain_input_messages JSON,
+    chain_output_messages JSON,
+    chain_prompt_tokens INTEGER,
+    chain_completion_tokens INTEGER,
+    chain_total_tokens INTEGER,
+    chain_prompt_cost REAL,
+    chain_completion_cost REAL,
+    chain_total_cost REAL,
 
     -- Pointer to the previous step in the sequence
     previous_step_id TEXT,

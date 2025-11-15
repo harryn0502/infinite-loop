@@ -28,13 +28,67 @@ def safe_get(d: Dict[str, Any], path: List[Any], default: Any = None) -> Any:
 
 
 def get_conn() -> sqlite3.Connection:
-    """Get a SQLite connection, ensuring the schema exists first."""
-    # Ensure the schema is present before opening the connection. This call is
-    # idempotent and will initialise the database if it does not yet exist.
-    ensure_schema(DB_PATH)
+    """Get a SQLite connection without resetting existing tables.
+
+    If the database file does not yet exist, this will call
+    `ensure_schema()` once to create the tables. Unlike the previous
+    implementation, we do not call `ensure_schema()` on every connection
+    because that would drop and recreate the tables, losing data. Instead,
+    this lazily initialises the schema only if needed.
+    """
+    # Only initialise schema if database file does not exist
+    if not os.path.exists(DB_PATH):
+        ensure_schema(DB_PATH)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+def build_root_id_map(runs: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Build a mapping from each run's id to the id of its root parent run.
+
+    LangSmith traces form a tree where each run references its parent via
+    the `parent_run_id` field. A run whose `parent_run_id` is None is a root.
+    This helper walks the parent chain to find the root id for each run.
+
+    Parameters
+    ----------
+    runs: List[Dict]
+        A list of run dicts loaded from JSON.
+
+    Returns
+    -------
+    Dict[str, str]
+        A mapping from run id to its root id. Runs without an id will be
+        ignored in the mapping.
+    """
+    # Build a lookup by run id for quick parent traversal
+    by_id: Dict[str, Dict[str, Any]] = {r.get('id'): r for r in runs if r.get('id')}
+    root_cache: Dict[str, str] = {}
+
+    def find_root(rid: str) -> str:
+        # Return cached if computed
+        if rid in root_cache:
+            return root_cache[rid]
+        # If run not found, treat id as its own root
+        run = by_id.get(rid)
+        if not run:
+            root_cache[rid] = rid
+            return rid
+        parent_id = run.get('parent_run_id')
+        # If no parent, this run is the root
+        if not parent_id:
+            root_cache[rid] = rid
+            return rid
+        # Otherwise, recursively find parent root
+        root = find_root(parent_id)
+        root_cache[rid] = root
+        return root
+
+    # Compute root id for all runs with ids
+    for rid in by_id:
+        find_root(rid)
+    return root_cache
 
 
 def parse_llm_step(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,60 +165,110 @@ def parse_tool_step(run: Dict[str, Any]) -> Dict[str, Any]:
         result['tool_latency_ms'] = None
     return result
 
+def parse_chain_step(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract fields for a chain step from a LangSmith run dict.
 
-def ingest_session(runs: List[Dict[str, Any]]) -> None:
-    """Ingest a list of LangSmith run dicts belonging to the same session.
+    A "chain" run in LangSmith represents a high‑level composition of
+    sub‑runs (for example, a LangGraph node). Unlike pure LLM or tool
+    runs, these objects encapsulate their own token usage and cost
+    information. To align with the unified `steps` schema we explode
+    those metrics into the same `llm_*` columns used for LLM calls and
+    additionally expose chain‑specific metadata in dedicated columns.
+    """
+    # Helper to coerce values to int/float where appropriate
+    def to_int(val: Any) -> Any:
+        try:
+            return int(val) if val is not None else None
+        except Exception:
+            return None
+    def to_float(val: Any) -> Any:
+        try:
+            return float(val) if val is not None else None
+        except Exception:
+            return None
 
-    This function groups runs by session and writes a single agent_runs row along
-    with one steps row per run in temporal order. The session ID is used as
-    the `run_id` primary key for the agent_runs table. If the session_id is
-    missing, the trace_id or a generated UUID will be used instead.
+    result: Dict[str, Any] = {}
+    # Normalise token counts into the llm_* fields
+    result['llm_input_tokens'] = to_int(run.get('prompt_tokens'))
+    result['llm_output_tokens'] = to_int(run.get('completion_tokens'))
+    result['llm_total_tokens'] = to_int(run.get('total_tokens'))
+    # Normalise cost into llm_* cost fields
+    result['llm_prompt_cost'] = to_float(run.get('prompt_cost'))
+    result['llm_completion_cost'] = to_float(run.get('completion_cost'))
+    result['llm_total_cost'] = to_float(run.get('total_cost'))
+    # Chain runs have no explicit prompt or output text, nor a finish reason
+    result['prompt_text'] = None
+    result['llm_output_text'] = None
+    result['finish_reason'] = None
+    # Model metadata – reuse any available inner model identifiers
+    meta = safe_get(run, ['extra', 'metadata'], {}) or {}
+    result['model_name'] = meta.get('ls_model_name')
+    result['model_provider'] = meta.get('ls_provider')
+    # No direct tool call requests for chain runs
+    result['tool_call_requests'] = None
+    # Explode chain‑specific fields
+    result['chain_name'] = run.get('name')
+    result['chain_status'] = run.get('status')
+    result['chain_input_messages'] = safe_get(run, ['inputs', 'messages'])
+    result['chain_output_messages'] = safe_get(run, ['outputs', 'messages'])
+    result['chain_prompt_tokens'] = to_int(run.get('prompt_tokens'))
+    result['chain_completion_tokens'] = to_int(run.get('completion_tokens'))
+    result['chain_total_tokens'] = to_int(run.get('total_tokens'))
+    result['chain_prompt_cost'] = to_float(run.get('prompt_cost'))
+    result['chain_completion_cost'] = to_float(run.get('completion_cost'))
+    result['chain_total_cost'] = to_float(run.get('total_cost'))
+    return result
+
+
+def ingest_session(runs: List[Dict[str, Any]], root_id: str) -> None:
+    """Ingest a list of LangSmith run dicts belonging to the same trace/root.
+
+    This function aggregates the runs into a single agent_runs row identified
+    by `root_id` and inserts one steps row per run in chronological order.
+    The original session_id from the runs is preserved in the agent_runs table.
     """
     if not runs:
         return
-    # Determine a key for this agent run. Prefer the session_id if present.
-    session_id = runs[0].get('session_id') or runs[0].get('trace_id') or str(uuid.uuid4())
-    # Compute aggregate fields for the agent run
-    # Sort runs by start_time for chronological info
+    # Sort runs chronologically by start_time for ordering
     sorted_runs = sorted(runs, key=lambda r: r.get('start_time'))
     start_time = sorted_runs[0].get('start_time')
     end_time = sorted_runs[-1].get('end_time')
-    # Determine status: if any run errored, mark agent run as error
+    # Determine session_id from first run for reference
+    session_id = sorted_runs[0].get('session_id') or sorted_runs[0].get('trace_id')
+    # Determine status and collect error messages across runs
     status = 'success'
-    error_messages = []
+    error_messages: List[str] = []
     for run in sorted_runs:
         if run.get('status') == 'error' or run.get('error'):
             status = 'error'
             if run.get('error'):
                 error_messages.append(str(run['error']))
     error = '\n'.join(error_messages) if error_messages else None
-    # Gather input and output messages from first and last LLM runs if available
+    # Gather input and output messages from first and last LLM runs
     first_llm = next((r for r in sorted_runs if r.get('run_type') == 'llm'), None)
     last_llm = next((r for r in reversed(sorted_runs) if r.get('run_type') == 'llm'), None)
     input_messages = safe_get(first_llm or sorted_runs[0], ['inputs', 'messages'])
     output_messages = safe_get(last_llm or sorted_runs[-1], ['outputs', 'generations'])
-    # Metadata from the first run
+    # Metadata and runtime from the root run (first run in sorted list)
     meta = safe_get(sorted_runs[0], ['extra', 'metadata'], {})
     runtime_info = safe_get(sorted_runs[0], ['extra', 'runtime'], {})
     model_name = meta.get('ls_model_name')
     tags = sorted_runs[0].get('tags')
     langgraph_metadata = meta
-    # Aggregate token and cost at the agent level (sum across runs where available)
-    # Coerce token counts to integers where possible
+    # Aggregate total tokens and cost across runs
     def parse_int(x: Any) -> int:
         try:
             return int(x)
         except Exception:
             return 0
     total_tokens = sum(parse_int(run.get('total_tokens')) for run in sorted_runs)
-    # Sum costs, coercing to float where possible
     def parse_cost(x: Any) -> float:
         try:
             return float(x)
         except Exception:
             return 0.0
     total_cost = sum(parse_cost(run.get('total_cost')) for run in sorted_runs)
-    # Insert the agent run
+    # Insert or replace the agent run row with run_id = root_id
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -175,14 +279,14 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
             total_tokens, total_cost
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            session_id,
+            root_id,
             start_time,
             end_time,
             status,
             error,
-            None,  # user_id (not present in input)
+            None,
             session_id,
-            None,  # thread_id (not present at run level)
+            None,
             json.dumps(input_messages) if input_messages is not None else None,
             json.dumps(output_messages) if output_messages is not None else None,
             model_name,
@@ -193,21 +297,23 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
             total_cost,
         ),
     )
-    # Build and insert steps
+    # Build and insert step rows
     previous_step_id: str = None
     for idx, run in enumerate(sorted_runs):
         step_id = run.get('id') or str(uuid.uuid4())
-        is_llm = 1 if run.get('run_type') == 'llm' else 0
-        is_tool = 1 if run.get('run_type') == 'tool' else 0
-        is_chain = 1 if run.get('run_type') == 'chain' else 0
-        # Base fields
-        step_data = {
+        run_type = run.get('run_type')
+        is_llm = 1 if run_type == 'llm' else 0
+        is_tool = 1 if run_type == 'tool' else 0
+        is_chain = 1 if run_type == 'chain' else 0
+        # Initialise base step data with defaults
+        step_data: Dict[str, Any] = {
             'step_id': step_id,
-            'run_id': session_id,
+            'run_id': root_id,
             'step_index': idx,
             'is_llm_call': is_llm,
             'is_tool_call': is_tool,
-            # LLM fields default to None
+            'is_chain_call': is_chain,
+            # LLM fields
             'prompt_text': None,
             'llm_output_text': None,
             'llm_input_tokens': None,
@@ -220,7 +326,7 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
             'model_name': None,
             'model_provider': None,
             'tool_call_requests': None,
-            # Tool fields default to None
+            # Tool fields
             'tool_name': None,
             'tool_args': None,
             'tool_status': None,
@@ -228,19 +334,35 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
             'tool_message_content': None,
             'tool_cost': None,
             'tool_latency_ms': None,
+            # Chain fields
+            'chain_name': None,
+            'chain_status': None,
+            'chain_input_messages': None,
+            'chain_output_messages': None,
+            'chain_prompt_tokens': None,
+            'chain_completion_tokens': None,
+            'chain_total_tokens': None,
+            'chain_prompt_cost': None,
+            'chain_completion_cost': None,
+            'chain_total_cost': None,
+            # Link to previous step
             'previous_step_id': previous_step_id,
         }
+        # Populate fields based on step type
         if is_llm:
             llm_fields = parse_llm_step(run)
             step_data.update(llm_fields)
         if is_tool:
             tool_fields = parse_tool_step(run)
             step_data.update(tool_fields)
-        # Insert this step into the database
+        if is_chain:
+            chain_fields = parse_chain_step(run)
+            step_data.update(chain_fields)
+        # Insert step into the database
         cur.execute(
             """INSERT OR REPLACE INTO steps (
                 step_id, run_id, step_index,
-                is_llm_call, is_tool_call,
+                is_llm_call, is_tool_call, is_chain_call,
                 prompt_text, llm_output_text,
                 llm_input_tokens, llm_output_tokens, llm_total_tokens,
                 llm_prompt_cost, llm_completion_cost, llm_total_cost,
@@ -249,14 +371,33 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
                 tool_name, tool_args, tool_status,
                 tool_response, tool_message_content,
                 tool_cost, tool_latency_ms,
+                chain_name, chain_status, chain_input_messages, chain_output_messages,
+                chain_prompt_tokens, chain_completion_tokens, chain_total_tokens,
+                chain_prompt_cost, chain_completion_cost, chain_total_cost,
                 previous_step_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?
+            )""",
             (
                 step_data['step_id'],
                 step_data['run_id'],
                 step_data['step_index'],
                 step_data['is_llm_call'],
                 step_data['is_tool_call'],
+                step_data['is_chain_call'],
                 step_data['prompt_text'],
                 step_data['llm_output_text'],
                 step_data['llm_input_tokens'],
@@ -276,10 +417,19 @@ def ingest_session(runs: List[Dict[str, Any]]) -> None:
                 step_data['tool_message_content'],
                 step_data['tool_cost'],
                 step_data['tool_latency_ms'],
+                step_data['chain_name'],
+                step_data['chain_status'],
+                json.dumps(step_data['chain_input_messages']) if step_data['chain_input_messages'] is not None else None,
+                json.dumps(step_data['chain_output_messages']) if step_data['chain_output_messages'] is not None else None,
+                step_data['chain_prompt_tokens'],
+                step_data['chain_completion_tokens'],
+                step_data['chain_total_tokens'],
+                step_data['chain_prompt_cost'],
+                step_data['chain_completion_cost'],
+                step_data['chain_total_cost'],
                 step_data['previous_step_id'],
             ),
         )
-        # Update previous_step_id for next iteration
         previous_step_id = step_id
     conn.commit()
     conn.close()
@@ -294,17 +444,25 @@ def ingest_file(json_path: str) -> None:
     """
     with open(json_path, 'r') as f:
         data = json.load(f)
-    # print(len(data))
-    # # Normalise to list
-    # if isinstance(data, dict):
-    #     data = [data]
-    # Group by session_id or trace_id
+    # Normalise to list
+    if isinstance(data, dict):
+        data = [data]
+    # Build a mapping from run id to root id for grouping
+    root_map = build_root_id_map(data)
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for run in data:
-        key = run.get('session_id') or run.get('trace_id') or str(uuid.uuid4())
-        groups.setdefault(key, []).append(run)
-    for session_runs in groups.values():
-        ingest_session(session_runs)
+        run_id = run.get('id')
+        # Determine the root id for this run. If no id present, fall back to session or trace.
+        root_id = None
+        if run_id and run_id in root_map:
+            root_id = root_map[run_id]
+        else:
+            # If run lacks id or mapping, fall back to session_id/trace_id or new UUID
+            root_id = run.get('session_id') or run.get('trace_id') or str(uuid.uuid4())
+        groups.setdefault(root_id, []).append(run)
+    # Ingest each group using its root id
+    for root_id, group_runs in groups.items():
+        ingest_session(group_runs, root_id)
 
 if __name__ == '__main__':
     import sys
