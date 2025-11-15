@@ -210,3 +210,5 @@ __marimo__/
 # tessl
 tessl*
 .tessl
+
+raw_data/
