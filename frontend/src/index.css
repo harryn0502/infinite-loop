@@ -1,0 +1,13 @@
+/* Import the reset */
+@import "simple-reset";
+
+/* Ensure the app fills the screen */
+body,
+html,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* Prevent scrolling on the body */
+}
