@@ -3,6 +3,7 @@ import styled from "styled-components";
 
 // --- IMPORT NEW HOOKS ---
 import { useTraces, type TraceHeader } from "../hooks/useTraces";
+// 👇 --- IMPORT NestedRunNode HERE ---
 import { useNestedTrace } from "../hooks/useNestedTrace";
 
 import { RunNode } from "./RunNode";
@@ -10,6 +11,9 @@ import { truncateJsonValues } from "../utils/format";
 import { GraphView } from "./GraphView";
 import { useFlowData } from "../hooks/useFlowData";
 import { ReactFlowProvider } from "@xyflow/react";
+// 👇 --- IMPORT NEW MODAL ---
+import { NodeInspectorModal } from "./NodeInspectorModal";
+import type { NestedRunNode } from "../types";
 
 type ActiveTab = "graph" | "json";
 
@@ -153,6 +157,10 @@ export const LangSmithViewer = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const timerRef = useRef<number | null>(null);
 
+  // 👇 --- ADD NEW STATE ---
+  const [inspectedNode, setInspectedNode] = useState<NestedRunNode | null>(null);
+  // 👆 --- END ADDITION ---
+
   // --- (Playback logic remains the same) ---
   const pausePlayback = useCallback(() => {
     setIsPlaying(false);
@@ -173,7 +181,7 @@ export const LangSmithViewer = () => {
             return s;
           }
         });
-      }, 800);
+      }, 1500);
     }
     return () => {
       if (timerRef.current) {
@@ -184,13 +192,6 @@ export const LangSmithViewer = () => {
   }, [isPlaying, maxSequence, pausePlayback]);
 
   // --- 2. UPDATE HANDLERS ---
-
-  // --- !! REMOVED THE PROBLEMATIC USEEFFECT !! ---
-  // useEffect(() => {
-  //   setCurrentSequence(1);
-  //   pausePlayback();
-  // }, [selectedRun, pausePlayback]);
-  // --- !! END REMOVAL !! ---
 
   const handleRunSelect = (run: TraceHeader) => {
     // Only update if it's a new run
@@ -229,7 +230,10 @@ export const LangSmithViewer = () => {
 
   const truncatedJson = useMemo(() => {
     if (!selectedRun) return "";
+
+    // No cast is needed because truncateJsonValues now accepts 'unknown'
     const truncatedObj = truncateJsonValues(selectedRun, 100);
+
     return JSON.stringify(truncatedObj, null, 2);
   }, [selectedRun]);
 
@@ -281,7 +285,7 @@ export const LangSmithViewer = () => {
               </TracerButton>
             )}
             <TracerButton onClick={handleStop} title="Stop (Reset)">
-              &#9632;
+              &#x23EE;
             </TracerButton>
             <Slider
               type="range"
@@ -301,7 +305,14 @@ export const LangSmithViewer = () => {
 
           {!isTraceLoading && activeTab === "graph" && (
             <ReactFlowProvider>
-              <GraphView nodes={nodes} edges={edges} currentSequence={currentSequence} />
+              <GraphView
+                nodes={nodes}
+                edges={edges}
+                currentSequence={currentSequence}
+                setCurrentSequence={setCurrentSequence}
+                pausePlayback={pausePlayback}
+                setInspectedNode={setInspectedNode} // 👈 --- PASS PROP ---
+              />
             </ReactFlowProvider>
           )}
 
@@ -314,6 +325,12 @@ export const LangSmithViewer = () => {
             ))}
         </DetailContainer>
       </DetailColumn>
+
+      {/* 👇 --- ADD MODAL RENDER --- 👇 */}
+      {inspectedNode && (
+        <NodeInspectorModal run={inspectedNode} onClose={() => setInspectedNode(null)} />
+      )}
+      {/* 👆 --- END ADDITION --- 👆 */}
     </Wrapper>
   );
 };

@@ -4,14 +4,18 @@ import { type TraceHeader } from "../hooks/useTraces";
 import { getRunIcon } from "../utils/format";
 
 interface RunNodeProps {
-  run: TraceHeader; // Use the new type
-  onSelect: (run: TraceHeader) => void; // Use the new type
+  run: TraceHeader; // This type has 'status', not 'error'
+  onSelect: (run: TraceHeader) => void;
   selectedRunId?: string | null;
 }
 
 export const RunNode: React.FC<RunNodeProps> = ({ run, onSelect, selectedRunId }) => {
-  // Removed all logic for expansion and children
   const isSelected = run.run_id === selectedRunId;
+
+  // 👇 --- THIS IS THE FIX --- 👇
+  // We use 'run.status' directly, as defined in the TraceHeader type.
+  const status = run.status;
+  // 👆 --- END OF FIX --- 👆
 
   const handleSelect = () => {
     onSelect(run);
@@ -25,7 +29,7 @@ export const RunNode: React.FC<RunNodeProps> = ({ run, onSelect, selectedRunId }
         <Icon>{getRunIcon("chain")}</Icon>
         <Name>{run.name}</Name>
         {/* Use the status from the API */}
-        <Status $status={run.status}>{run.status}</Status>
+        <Status $status={status}>{status}</Status>
       </NodeRow>
     </NodeWrapper>
   );
@@ -68,7 +72,8 @@ const Name = styled.span`
   white-space: nowrap;
 `;
 
-// Replaced Duration with Status, as end_time isn't in the /traces response
+// This component correctly styles "success" as green
+// and any other status (like "error") as red.
 const Status = styled.span<{ $status: string }>`
   font-size: 13px;
   color: ${(props) => (props.$status === "success" ? "#2e7d32" : "#c62828")};
@@ -77,5 +82,3 @@ const Status = styled.span<{ $status: string }>`
   font-weight: 600;
   text-transform: capitalize;
 `;
-
-// ChildrenContainer is no longer needed
