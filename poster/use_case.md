@@ -46,3 +46,5 @@ SELECT tool_name, AVG(tool_latency_ms) ...
 
 web_search_api: 812 ms
 → Biggest source of delay
+
+![alt text](usecase_diagram.png)
