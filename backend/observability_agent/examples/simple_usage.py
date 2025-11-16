@@ -5,8 +5,8 @@ Simple usage example showing the minimal code needed.
 from dotenv import load_dotenv
 load_dotenv()
 
-from observability_agent import build_graph, run_obs_agent
-from observability_agent.holistic_ai_bedrock import get_chat_model
+from backend.observability_agent import build_graph, run_obs_agent
+from backend.observability_agent.holistic_ai_bedrock import get_chat_model
 
 # Initialize once
 llm = get_chat_model()
@@ -17,7 +17,7 @@ app = build_graph(llm)
 
 # --- Example Scenarios -------------------------------------------------------
 # 1) Follow-up question style multi-turn metrics analysis
-#state = run_obs_agent("List the top 10 slowest success runs in agent_runs in last 24 hours", app)
+state = run_obs_agent("List the top 10 slowest success runs in agent_runs in last 24 hours", app)
 #state = run_obs_agent("last 24 hrs", app, state)
 #
 # 2) Clarifier + diagnostics flow (table selection + refined follow-up)
@@ -40,4 +40,4 @@ app = build_graph(llm)
 # state = run_obs_agent("Show total_tokens by agent for the last day", app)
 # state = run_obs_agent("차트로 그려줘", app, state)
 
-state = run_obs_agent("1+1 이 뭐야", app)
+#state = run_obs_agent("1+1 이 뭐야", app)
