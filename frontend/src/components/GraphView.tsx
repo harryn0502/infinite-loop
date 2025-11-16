@@ -23,7 +23,7 @@ const nodeTypes = {
 type NodeData = {
   run: NestedRunNode;
   sequence: number;
-  isFocused?: boolean; // 👈 --- ADD isFocused (optional) ---
+  isFocused?: boolean;
 };
 // --- END TYPE ALIAS ---
 
@@ -90,17 +90,26 @@ export const GraphView = ({
   // --- END FOCUS EFFECT ---
 
   // 👇 --- THIS EFFECT IS MODIFIED --- 👇
-  // This effect applies a 'glowing' class AND the 'isFocused' prop
+  // This effect applies a 'glowing' class, the 'isFocused' prop,
+  // AND sorts the array to bring the focused node to the front (rendered last).
   useEffect(() => {
     setNodes((nds) =>
-      nds.map((node) => {
-        const isFocused = node.data.sequence === currentSequence;
-        return {
-          ...node,
-          className: isFocused ? "glowing" : "",
-          data: { ...node.data, isFocused: isFocused }, // Inject the prop
-        };
-      })
+      nds
+        .map((node) => {
+          const isFocused = node.data.sequence === currentSequence;
+          return {
+            ...node,
+            className: isFocused ? "glowing" : "",
+            data: { ...node.data, isFocused: isFocused },
+          };
+        })
+        .sort((a, b) => {
+          // This sort function moves the focused node to the end of the array.
+          // React Flow renders nodes in array order, so the last node is on top.
+          if (a.data.isFocused) return 1; // 'a' (focused) comes after 'b'
+          if (b.data.isFocused) return -1; // 'b' (focused) comes after 'a'
+          return 0; // No change in order for other nodes
+        })
     );
   }, [currentSequence, setNodes]); // Rerun when sequence changes or nodes are set
   // 👆 --- END OF MODIFICATION --- 👆
