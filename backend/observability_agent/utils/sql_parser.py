@@ -17,7 +17,7 @@ def extract_sql_from_text(text: str) -> str:
     Returns:
         Extracted SQL query string
     """
-    # ```sql ... ``` 패턴 찾기
+    # Find ```sql ... ``` pattern
     pattern = r"```sql(.*?)```"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:

@@ -29,14 +29,14 @@ def main():
     # Example 1: Metrics / Text2SQL query
     print("\n[Example 1] Metrics query")
     state1 = run_obs_agent(
-        "평균 latency가 가장 높은 tool 알려줘. 최근 7일 기준으로.",
+        "Tell me the tool with the highest average latency. Based on the last 7 days.",
         app
     )
 
     # Example 2: Row listing
     print("\n[Example 2] Row exploration")
     state2 = run_obs_agent(
-        "latency가 200ms 넘는 tool 호출 row 10개만 보여줘.",
+        "Show me 10 tool call rows with latency over 200ms.",
         app,
         prev_state=state1
     )
@@ -44,7 +44,7 @@ def main():
     # Example 3: Chart generation
     print("\n[Example 3] Chart visualization")
     state3 = run_obs_agent(
-        "지금 데이터로 tool별 평균 latency bar chart 그려줘.",
+        "Draw a bar chart of average latency by tool with the current data.",
         app,
         prev_state=state2
     )

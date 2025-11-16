@@ -12,7 +12,7 @@ def run_obs_agent(
     prev_state: Optional[ObsState] = None
 ) -> ObsState:
     """
-    멀티턴 지원용 실행 함수.
+    Execution function with multi-turn conversation support.
 
     Executes the observability agent with multi-turn conversation support.
     - If prev_state is provided, continues the conversation
@@ -35,23 +35,19 @@ def run_obs_agent(
             "messages": [HumanMessage(content=user_message)],
             "active_agent": "router",
             "last_rows": [],
-            "chart_context": {"rows": [], "metadata": {}},
             "plan": [],
             "plan_step_index": 0,
-            "clarification": {"status": "none"},
             "plan_mode": "default",
             "diagnostics_context": {"results": []},
         }
     else:
-        # 이전 대화에 새로운 user message 추가
+        # Add new user message to previous conversation
         state = {
             "messages": prev_state["messages"] + [HumanMessage(content=user_message)],
             "active_agent": prev_state["active_agent"],
             "last_rows": prev_state.get("last_rows", []),
-            "chart_context": prev_state.get("chart_context", {"rows": prev_state.get("last_rows", []), "metadata": {}}),
             "plan": [],
             "plan_step_index": 0,
-            "clarification": prev_state.get("clarification", {"status": "none"}),
             "plan_mode": prev_state.get("plan_mode", "default"),
             "diagnostics_context": prev_state.get("diagnostics_context", {"results": []}),
         }

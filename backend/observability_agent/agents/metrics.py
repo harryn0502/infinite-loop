@@ -125,7 +125,7 @@ def _attempt_sql_execution(
 
 def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = None) -> ObsState:
     """
-    자연어 → SQL 생성 → run_sql → 결과 요약.
+    Natural language → SQL generation → run_sql → result summary.
 
     Handles metrics and analytics queries by:
     1. Converting natural language to SQL
@@ -198,7 +198,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         )
     )
 
-    # 1st LLM call: 자연어 → SQL with structured output
+    # 1st LLM call: Natural language → SQL with structured output
     planner_messages = [planner_hint] if planner_hint else []
     if diagnostics_instruction:
         planner_messages.append(diagnostics_instruction)
@@ -244,7 +244,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
             plan_step_index=plan_index + 1,
         )
 
-    # rows를 dict 리스트로 변환해서 state에 저장
+    # Convert rows to dict list and store in state
     columns = sql_result["columns"]
     rows = sql_result["rows"]
     query_metadata = sql_result.get("metadata", {})
@@ -252,12 +252,6 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         {col: value for col, value in zip(columns, row)}
         for row in rows
     ]
-
-    chart_context = {
-        "rows": row_dicts,
-        "metadata": {},
-        "raw_rows": row_dicts,
-    }
 
     if plan_mode == "diagnostics" and planner_step:
         step_name = planner_step.get("name") or f"step_{plan_index + 1}"
@@ -268,7 +262,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
             rows=row_dicts,
         )
 
-    # 결과 요약 프롬프트 with structured output
+    # Result summary prompt with structured output
     result_system = SystemMessage(
         content=(
             "You are an observability analyst. The user asked a metrics question.\n"
@@ -304,7 +298,6 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         "columns": columns,
         "rows_preview": row_dicts[:MAX_METADATA_ROWS],
         "query_metadata": query_metadata,
-        "chart_metadata": chart_context["metadata"],
     }
 
     summary = AIMessage(
@@ -329,7 +322,6 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         messages=[draft, summary],
         active_agent="metrics_agent",
         last_rows=row_dicts,
-        chart_context=chart_context,
         plan=plan_steps,
         plan_step_index=next_step_index,
         diagnostics_context=updated_diagnostics_context or state.get("diagnostics_context", {}),

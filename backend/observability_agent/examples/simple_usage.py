@@ -20,24 +20,21 @@ app = build_graph(llm)
 state = run_obs_agent("List the top 10 slowest success runs in agent_runs in last 24 hours", app)
 #state = run_obs_agent("last 24 hrs", app, state)
 #
-# 2) Clarifier + diagnostics flow (table selection + refined follow-up)
-# state = run_obs_agent("요즘 latency가 길어진 것 같은데 왜 그래?", app)
-# # Router will first ask for the table name:
-# state = run_obs_agent("call_model 기준으로 알려줘", app, state)
-# # If more detail is needed, continue clarifying:
-# state = run_obs_agent("최근 3일 전체 시스템 평균 latency", app, state)
+# 2) Diagnostics follow-up (provide extra detail manually)
+# state = run_obs_agent("Latency seems to have increased recently. Why is that?", app)
+# state = run_obs_agent("Focus on the call_model table for the last 3 days", app, state)
 #
 # 3) Diagnostics mode (structured root cause analysis)
-# state = run_obs_agent("최근 4시간 동안 토큰 사용량이 갑자기 늘었어. 이유 찾아줘", app)
+# state = run_obs_agent("Token usage suddenly increased in the last 4 hours. Find the reason", app)
 # state = run_obs_agent("call_chain", app, state)
 # (Planner will produce the diagnostics skeleton and run metrics/summary agents)
 #
 # 3-b) Diagnostics with tool-level follow-up
-#state = run_obs_agent("최근 1일 동안 model 토큰이 급증한 원인을 알고 싶어", app)
+#state = run_obs_agent("I want to know why model tokens spiked in the last day", app)
 #state = run_obs_agent("call_tool", app, state)
 #
 # 4) Tokens + chart
 # state = run_obs_agent("Show total_tokens by agent for the last day", app)
-# state = run_obs_agent("차트로 그려줘", app, state)
+# state = run_obs_agent("Draw it as a chart", app, state)
 
-#state = run_obs_agent("1+1 이 뭐야", app)
+#state = run_obs_agent("What is 1+1", app)

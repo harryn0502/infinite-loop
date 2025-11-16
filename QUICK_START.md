@@ -30,20 +30,20 @@ app = build_graph(llm)
 
 # Step 2: Run metrics query
 state1 = run_obs_agent(
-    "평균 latency가 가장 높은 tool 알려줘. 최근 7일 기준으로.",
+    "Tell me the tool with the highest average latency. Based on the last 7 days.",
     app
 )
 
 # Step 3: Continue conversation - list rows
 state2 = run_obs_agent(
-    "latency가 200ms 넘는 tool 호출 row 10개만 보여줘.",
+    "Show me 10 tool call rows with latency over 200ms.",
     app,
     prev_state=state1
 )
 
 # Step 4: Create visualization
 state3 = run_obs_agent(
-    "지금 데이터로 tool별 평균 latency bar chart 그려줘.",
+    "Draw a bar chart of average latency by tool with the current data.",
     app,
     prev_state=state2
 )
@@ -55,7 +55,7 @@ state3 = run_obs_agent(
 Handles analytics and Text2SQL queries.
 
 **Examples:**
-- "평균 latency가 가장 높은 tool 알려줘"
+- "Tell me the tool with the highest average latency"
 - "Show me the slowest 10 runs from last week"
 - "What's the average token usage by agent?"
 
@@ -63,7 +63,7 @@ Handles analytics and Text2SQL queries.
 Generates visualization specifications.
 
 **Examples:**
-- "bar chart 그려줘"
+- "Draw a bar chart"
 - "Create a line chart from this data"
 - "Visualize as a scatter plot"
 

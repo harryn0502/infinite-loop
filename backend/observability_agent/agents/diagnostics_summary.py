@@ -64,9 +64,9 @@ def diagnostics_summary_agent_node(state: ObsState, llm) -> ObsState:
     first_rows = results[0].get("rows") if results else []
     if not first_rows:
         content = (
-            "첫 번째 진단 단계(overall_change)에서 비교할 데이터가 없어 "
-            "추가 step을 생략했습니다.\n"
-            "최근과 기준 기간 모두에 호출이 존재하는지 확인한 뒤 다시 요청해 주세요."
+            "The first diagnostic step (overall_change) had no data to compare, "
+            "so additional steps were skipped.\n"
+            "Please verify that calls exist in both the recent and baseline periods, then try again."
         )
         summary_msg = AIMessage(content=content)
         plan_index = state.get("plan_step_index", 0)
@@ -91,7 +91,7 @@ def diagnostics_summary_agent_node(state: ObsState, llm) -> ObsState:
         "3) Explain them in simple language\n"
         "4) Recommend concrete next steps (limit retries, optimize prompts, etc.)\n"
         "Always cite the key numbers you rely on. "
-        f"Respond in {'Korean' if use_korean else 'English'}."
+        "Respond in English."
     )
 
     context_text = format_diagnostics_results_for_prompt(results)

@@ -58,7 +58,7 @@ def _format_table_section(table: str) -> str:
 @lru_cache(maxsize=1)
 def get_observability_schema() -> str:
     """
-    Text2SQL agent가 참고할 DB 스키마를 문자열로 리턴.
+    Returns DB schema as a string for Text2SQL agent reference.
 
     Returns:
         Schema description as a formatted string

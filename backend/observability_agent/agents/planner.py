@@ -3,10 +3,9 @@
 from typing import Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, SystemMessage
 
-from ..core.state import ClarificationState, ObsState
+from ..core.state import ObsState
 from ..utils.diagnostics import (
     DEFAULT_DIAGNOSTIC_WINDOW_HOURS,
-    extract_window_from_hints,
     extract_window_hours_from_text,
     infer_target_metric,
     DIAGNOSTICS_STEP_SPECS,
@@ -95,22 +94,16 @@ def _latest_user_text(state: ObsState) -> str:
     return ""
 
 
-def _resolve_window_hours(user_msg: str, clar: ClarificationState) -> int:
-    hints = clar.get("hints", {}) if clar else {}
-    return (
-        extract_window_from_hints(hints)
-        or extract_window_hours_from_text(user_msg)
-        or DEFAULT_DIAGNOSTIC_WINDOW_HOURS
-    )
+def _resolve_window_hours(user_msg: str) -> int:
+    return extract_window_hours_from_text(user_msg) or DEFAULT_DIAGNOSTIC_WINDOW_HOURS
 
 
 def make_diagnostics_plan(
     user_msg: str,
-    clar: ClarificationState,
     prev_context: Dict[str, int],
 ) -> Tuple[PlannerResponse, Dict[str, int]]:
     """Deterministic plan skeleton for diagnostics mode."""
-    window_hours = prev_context.get("recent_window_hours") or _resolve_window_hours(user_msg, clar)
+    window_hours = prev_context.get("recent_window_hours") or _resolve_window_hours(user_msg)
     target_metric = prev_context.get("target_metric") or infer_target_metric(user_msg)
     baseline_hours = prev_context.get("baseline_window_hours", window_hours)
     recent_hours = prev_context.get("recent_window_hours", window_hours)
@@ -161,9 +154,8 @@ def planner_agent_node(state: ObsState, llm) -> ObsState:
 
     if plan_mode == "diagnostics":
         user_text = _latest_user_text(state)
-        clar_state = state.get("clarification", {"status": "none"})
         diag_context = state.get("diagnostics_context", {})
-        response, diag_updates = make_diagnostics_plan(user_text, clar_state, diag_context)
+        response, diag_updates = make_diagnostics_plan(user_text, diag_context)
         plan_steps = [step.model_dump() for step in response.steps]
         plan_text = _format_plan_text(response.summary, response.steps)
         diagnostics_context = {**diag_context, **diag_updates, "results": []}
@@ -240,10 +232,6 @@ def planner_agent_node(state: ObsState, llm) -> ObsState:
         "messages": [plan_message],
         "active_agent": "planner",
         "last_rows": state.get("last_rows", []),
-        "chart_context": state.get(
-            "chart_context",
-            {"rows": state.get("last_rows", []), "metadata": {}},
-        ),
         "plan": plan_steps,
         "plan_step_index": 0,
         "diagnostics_context": diagnostics_context,

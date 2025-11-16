@@ -14,26 +14,22 @@ _CAUSE_SIGNALS = [
     "increase",
     "spike",
     "sudden",
-    "느려",
-    "원인",
-    "이유",
-    "갑자기",
-    "불안정",
+    "slow",
+    "unstable",
 ]
 
 _METRIC_SIGNALS = [
     "latency",
     "response time",
-    "지연",
+    "delay",
     "tokens",
     "token",
-    "토큰",
-    "비용",
+    "token usage",
     "cost",
 ]
 
-_LATENCY_KEYWORDS = ["latency", "지연", "느려", "delay", "응답속도"]
-_TOKEN_KEYWORDS = ["token", "tokens", "토큰", "비용", "cost", "usage"]
+_LATENCY_KEYWORDS = ["latency", "delay", "slow", "response time"]
+_TOKEN_KEYWORDS = ["token", "tokens", "token usage", "cost", "usage"]
 
 
 def is_diagnostics_intent(text: str) -> bool:
@@ -59,26 +55,15 @@ def infer_target_metric(text: str) -> str:
 
 
 def extract_window_hours_from_text(text: str) -> Optional[int]:
-    """Parse a timeframe like 'last 3 days' or '최근 24시간'."""
+    """Parse a timeframe like 'last 3 days' or 'last 24 hours'."""
     if not text:
         return None
-    hour_match = re.search(r"(\d+)\s*(시간|hour|hours)", text, re.IGNORECASE)
+    hour_match = re.search(r"(\d+)\s*(hour|hours)", text, re.IGNORECASE)
     if hour_match:
         return int(hour_match.group(1))
-    day_match = re.search(r"(\d+)\s*(일|day|days)", text, re.IGNORECASE)
+    day_match = re.search(r"(\d+)\s*(day|days)", text, re.IGNORECASE)
     if day_match:
         return int(day_match.group(1)) * 24
-    return None
-
-
-def extract_window_from_hints(hints: Dict[str, Any]) -> Optional[int]:
-    """Read time window hints provided by the clarifier."""
-    if not hints:
-        return None
-    for key in ("time_window_hours", "window_hours", "recent_window_hours"):
-        value = hints.get(key)
-        if isinstance(value, (int, float)):
-            return int(value)
     return None
 
 
@@ -88,31 +73,32 @@ DIAGNOSTICS_STEP_SPECS: List[Dict[str, Any]] = [
         "agent": "metrics_agent",
         "mode": "overall",
         "objective_template": (
-            "최근 {recent_hours}시간과 그 전 {baseline_hours}시간의 {metric} 평균/최댓값을 비교한다."
+            "Compare the average/max {metric} between the recent {recent_hours} hours "
+            "and the previous {baseline_hours} hours."
         ),
-        "success": "두 기간의 평균/최댓값과 호출 수를 계산해 rows로 반환",
+        "success": "Calculate average/max values and call counts for both periods and return as rows",
     },
     {
         "name": "by_tool",
         "agent": "metrics_agent",
         "mode": "by_tool",
-        "objective_template": "tool별 {metric} 평균과 호출 수를 두 기간으로 비교한다.",
-        "success": "증가폭이 큰 tool 상위 10개를 찾는다.",
+        "objective_template": "Compare {metric} average and call count by tool for the two periods.",
+        "success": "Find the top 10 tools with the largest increase.",
     },
     {
         "name": "by_agent",
         "agent": "metrics_agent",
         "mode": "by_agent",
-        "objective_template": "agent_name별 {metric} 평균과 호출 수를 비교한다.",
-        "success": "증가폭이 큰 agent를 찾는다.",
+        "objective_template": "Compare {metric} average and call count by agent_name.",
+        "success": "Find agents with the largest increase.",
     },
     {
         "name": "summarize",
         "agent": "diagnostics_summary_agent",
         "objective_template": (
-            "이전 단계들의 결과를 바탕으로 주요 원인 후보를 요약하고 간단한 action item을 제안한다."
+            "Summarize the key root cause candidates based on previous steps and suggest simple action items."
         ),
-        "success": "주요 원인 2~3개와 근거 숫자를 함께 제시",
+        "success": "Present 2-3 key causes with supporting numbers",
     },
 ]
 

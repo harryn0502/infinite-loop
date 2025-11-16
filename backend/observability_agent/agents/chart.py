@@ -13,7 +13,7 @@ MAX_METADATA_ROWS = 20
 
 def chart_agent_node(state: ObsState, llm) -> ObsState:
     """
-    최근 SQL 결과(last_rows)를 기반으로 차트 스펙(JSON)를 생성.
+    Generate chart specification (JSON) based on recent SQL results (last_rows).
 
     Generates visualization specifications from data:
     1. Checks if data rows are available
@@ -30,10 +30,7 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
     Returns:
         Updated state with chart specification
     """
-    chart_context = state.get("chart_context", {"rows": state.get("last_rows", []), "metadata": {}})
-    raw_rows = chart_context.get("raw_rows") or state.get("last_rows", [])
-    last_rows = raw_rows or chart_context.get("rows") or state.get("last_rows", [])
-    chart_meta = chart_context.get("metadata", {})
+    last_rows = state.get("last_rows", [])
     user_message = state["messages"][-1]
     plan_steps = state.get("plan", []) or []
     plan_index = state.get("plan_step_index", 0)
@@ -58,20 +55,19 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
             state,
             messages=[msg],
             active_agent="chart_agent",
-            last_rows=last_rows,
-            chart_context=chart_context,
             plan=plan_steps,
             plan_step_index=plan_index + 1,
         )
 
-    if not chart_meta:
-        try:
-            chart_ready = prepare_chart_data_tool.invoke({"rows": last_rows})
-            last_rows = chart_ready["rows"]
-            chart_meta = chart_ready.get("metadata", {})
-            raw_rows = raw_rows or chart_ready.get("raw_rows", last_rows)
-        except Exception:
-            chart_meta = chart_meta or {}
+    # Prepare chart data and metadata
+    chart_meta = {}
+    try:
+        chart_ready = prepare_chart_data_tool.invoke({"rows": last_rows})
+        prepared_rows = chart_ready["rows"]
+        chart_meta = chart_ready.get("metadata", {})
+    except Exception:
+        prepared_rows = last_rows
+        chart_meta = {}
 
     system = SystemMessage(
         content=(
@@ -90,7 +86,7 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
 
     helper_content = (
         f"User request: {user_message.content}\n\n"
-        f"Prepared data rows: {last_rows}\n\n"
+        f"Prepared data rows: {prepared_rows}\n\n"
         f"Chart metadata: {chart_meta}"
     )
     if planner_instruction:
@@ -102,7 +98,7 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
     chart_response = llm_with_structure.invoke([system, helper_user])
 
     # Create JSON spec for frontend
-    chart_data = chart_response.data or last_rows
+    chart_data = chart_response.data or prepared_rows
     reasoning_text = chart_response.reasoning or "Model did not provide a detailed explanation."
     label_field = chart_response.x_field or chart_meta.get("label_field", "label")
     value_field = chart_response.y_field or chart_meta.get("value_field", "value")
@@ -132,18 +128,10 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
         }
     )
 
-    new_chart_context = {
-        "rows": chart_data,
-        "metadata": {**chart_meta, "chart_type": chart_type, "label_field": label_field, "value_field": value_field},
-        "raw_rows": raw_rows or chart_data,
-    }
-
     return agent_state_update(
         state,
         messages=[spec_msg],
         active_agent="chart_agent",
-        last_rows=raw_rows or state.get("last_rows", []),
-        chart_context=new_chart_context,
         plan=plan_steps,
         plan_step_index=plan_index + 1,
     )
