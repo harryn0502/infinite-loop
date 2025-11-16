@@ -2,11 +2,11 @@
 Simple usage example showing the minimal code needed.
 """
 
-import sys
-from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 
-from src.observability_agent import build_graph, run_obs_agent
-from tutorials.holistic_ai_bedrock import get_chat_model
+from observability_agent import build_graph, run_obs_agent
+from observability_agent.holistic_ai_bedrock import get_chat_model
 
 # Initialize once
 llm = get_chat_model()

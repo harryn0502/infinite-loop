@@ -1,33 +1,44 @@
-import useSWR from "swr";
+import { useState, useEffect } from "react";
 
-// This shape must match the data from your /traces endpoint
+// In useTraces.ts
 export interface TraceHeader {
   run_id: string;
   name: string;
   start_time: string;
+  end_time: string | null;
   status: string;
   total_cost: number | null;
   total_tokens: number | null;
+  // 👇 NEW FIELDS
+  input_messages: string | null; // Raw JSON string from DB
+  output_messages: string | null; // Raw JSON string from DB
 }
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
-
-/**
- * Fetches the list of all trace headers from the backend.
- */
 export const useTraces = () => {
-  const { data, error, isLoading } = useSWR<TraceHeader[]>(
-    "/api/traces", // Your FastAPI endpoint
-    fetcher,
-    {
-      refreshInterval: 10000,
-    }
-  );
+  const [traces, setTraces] = useState<TraceHeader[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  // This MUST return an object with the 'traces' key
-  return {
-    traces: data,
-    isLoading,
-    isError: error,
-  };
+  useEffect(() => {
+    const fetchTraces = async () => {
+      setIsLoading(true);
+      try {
+        // Ensure this points to your backend
+        const response = await fetch("/api/traces");
+        if (!response.ok) {
+          throw new Error("Failed to fetch traces");
+        }
+        const data: TraceHeader[] = await response.json();
+        setTraces(data);
+      } catch (e) {
+        setError(e as Error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTraces();
+  }, []);
+
+  return { traces, isLoading, error };
 };

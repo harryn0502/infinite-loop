@@ -1,16 +1,24 @@
-# docker-compose.yml
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: my_fastapi_backend_dev
+    container_name: my_fastapi_dev
     ports:
       - "8000:8000"
     volumes:
+      # Add this line:
+      - ./backend/observability_agent:/app/observability_agent 
       - ./backend/app:/app/app
       - ./backend/data:/app/data
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    env_file:
+      - ./backend/.env
 
   frontend:
     build:
@@ -23,3 +31,20 @@ services:
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/package-lock.json:/app/package-lock.json
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok_tunnel
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: "http my_fastapi_dev:8000"
+    depends_on:
+      backend:
+        condition: service_healthy

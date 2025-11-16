@@ -1,2 +1,8 @@
 fastapi
 uvicorn
+langgraph
+langchain-core
+langchain-openai
+langchain-valyu
+python-dotenv
+requests

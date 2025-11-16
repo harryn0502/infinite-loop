@@ -48,6 +48,7 @@ class ObsState(TypedDict):
         plan_mode: Current planner mode ("default" vs "diagnostics")
         diagnostics_context: Aggregated diagnostics results
     """
+
     # LangGraph basic messages (add_messages reducer 사용)
     messages: Annotated[List[AnyMessage], add_messages]
 
