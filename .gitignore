@@ -215,4 +215,3 @@ tessl*
 raw_data/
 
 .DS_Store
-*.sqlite
