@@ -3,29 +3,27 @@ import os
 
 """
 This module provides a simple utility to initialise the local SQLite database
-used for storing LangSmith trace data in a unified two‑level schema. The
-database will be created in the `data` subdirectory of the project
-repository. The schema includes two tables:
+used for storing LangSmith trace data in a unified schema.
 
-  * `agent_runs` — one row per agent episode (identified by session ID).
-  * `steps` — one row per logical step (LLM call or tool call) within an agent
-    episode. Steps include normalised token and cost columns, flags to
-    distinguish LLM and tool steps, and a pointer to the previous step to
-    reconstruct the chain of execution.
-
-Call the `ensure_schema()` function from your ingestion code to create the
-database and schema if they do not already exist. The function is idempotent;
-it will not destroy existing data.
+  * `agent_runs` — one row per agent episode (identified by run_id).
+  * `call_model` — one row per LLM call.
+  * `call_tool` — one row per tool call.
+  * `call_chain` — one row per chain/graph node call.
 """
 
-DB_PATH = os.path.join("..", "db_as_files", "agent_debug_db.sqlite")
+# --- MODIFIED LINE ---
+# This path is now relative to the CWD (which is /backend when you run uvicorn)
+# This will place the DB next to main.py
+DB_PATH = "agent_debug_db.sqlite"
 
-# SQL DDL for the two tables. We drop existing tables to ensure the schema
-# matches exactly; in a migration scenario you would instead use ALTER
-# statements or a proper migration tool.
+# SQL DDL for the tables. We drop existing tables to ensure the schema
+# matches exactly.
 SCHEMA_SQL = """
 DROP TABLE IF EXISTS agent_runs;
 DROP TABLE IF EXISTS steps;
+DROP TABLE IF EXISTS call_model;
+DROP TABLE IF EXISTS call_tool;
+DROP TABLE IF EXISTS call_chain;
 
 CREATE TABLE agent_runs (
     run_id TEXT PRIMARY KEY,
@@ -46,16 +44,13 @@ CREATE TABLE agent_runs (
     total_cost REAL
 );
 
-CREATE TABLE steps (
+CREATE TABLE call_model (
     step_id TEXT PRIMARY KEY,
     run_id TEXT,
     step_index INTEGER,
-    -- binary flags indicating the type of step
-    is_llm_call INTEGER,
-    is_tool_call INTEGER,
-    is_chain_call INTEGER,
+    previous_step_id TEXT,
 
-    -- LLM step fields (NULL for tool steps)
+    -- LLM step fields
     prompt_text TEXT,
     llm_output_text TEXT,
     llm_input_tokens INTEGER,
@@ -69,7 +64,18 @@ CREATE TABLE steps (
     model_provider TEXT,
     tool_call_requests JSON,
 
-    -- Tool step fields (NULL for LLM steps)
+    FOREIGN KEY(run_id) REFERENCES agent_runs(run_id)
+    -- Note: We cannot have a FOREIGN KEY on previous_step_id as it could
+    -- reference any of the three 'call_*' tables.
+);
+
+CREATE TABLE call_tool (
+    step_id TEXT PRIMARY KEY,
+    run_id TEXT,
+    step_index INTEGER,
+    previous_step_id TEXT,
+
+    -- Tool step fields
     tool_name TEXT,
     tool_args JSON,
     tool_status TEXT,
@@ -77,7 +83,17 @@ CREATE TABLE steps (
     tool_message_content TEXT,
     tool_cost REAL,
     tool_latency_ms INTEGER,
-    -- Chain step fields (for runs of type 'chain')
+
+    FOREIGN KEY(run_id) REFERENCES agent_runs(run_id)
+);
+
+CREATE TABLE call_chain (
+    step_id TEXT PRIMARY KEY,
+    run_id TEXT,
+    step_index INTEGER,
+    previous_step_id TEXT,
+
+    -- Chain step fields
     chain_name TEXT,
     chain_status TEXT,
     chain_input_messages JSON,
@@ -89,13 +105,10 @@ CREATE TABLE steps (
     chain_completion_cost REAL,
     chain_total_cost REAL,
 
-    -- Pointer to the previous step in the sequence
-    previous_step_id TEXT,
-
-    FOREIGN KEY(run_id) REFERENCES agent_runs(run_id),
-    FOREIGN KEY(previous_step_id) REFERENCES steps(step_id)
+    FOREIGN KEY(run_id) REFERENCES agent_runs(run_id)
 );
 """
+
 
 def ensure_schema(db_path: str = DB_PATH) -> None:
     """Create the SQLite database and schema if it does not already exist.
@@ -104,13 +117,19 @@ def ensure_schema(db_path: str = DB_PATH) -> None:
     schema differs, but existing data will be dropped. In a production system
     you would instead apply migrations to avoid data loss.
     """
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    # os.path.dirname("agent_debug_db.sqlite") is "" (empty string)
+    # os.makedirs("", exist_ok=True) will do nothing, which is correct.
+    dirname = os.path.dirname(db_path)
+    if dirname:
+        os.makedirs(dirname, exist_ok=True)
+
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.executescript(SCHEMA_SQL)
     conn.commit()
     conn.close()
     print(f"Schema ensured at: {db_path}")
+
 
 if __name__ == "__main__":
     ensure_schema()
