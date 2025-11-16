@@ -8,19 +8,32 @@ import {
   useReactFlow,
   type Node,
   type Edge,
+  type NodeMouseHandler,
 } from "@xyflow/react";
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { TraceNode } from "./TraceNode";
+import { type NestedRunNode } from "../types";
 
 // Pass our custom node to React Flow
 const nodeTypes = {
   traceNode: TraceNode,
 };
 
+// --- TYPE ALIAS ---
+type NodeData = {
+  run: NestedRunNode;
+  sequence: number;
+  isFocused?: boolean; // 👈 --- ADD isFocused (optional) ---
+};
+// --- END TYPE ALIAS ---
+
 interface GraphViewProps {
   nodes: Node[];
   edges: Edge[];
   currentSequence: number;
+  setCurrentSequence: (seq: number) => void;
+  pausePlayback: () => void;
+  setInspectedNode: (run: NestedRunNode) => void;
 }
 
 // You can style this better if you like
@@ -32,6 +45,9 @@ export const GraphView = ({
   nodes: layoutedNodes,
   edges: layoutedEdges,
   currentSequence,
+  setCurrentSequence,
+  pausePlayback,
+  setInspectedNode,
 }: GraphViewProps) => {
   // Get layouted data
   const { fitView, getNodes } = useReactFlow();
@@ -40,14 +56,21 @@ export const GraphView = ({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  // Update state when the layout changes (i.e., new run selected)
+  // Update state AND fit view when the layout changes
   useEffect(() => {
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
-  }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
 
-  // --- UPDATED FOCUS EFFECT (Camera) ---
-  // This effect now centers *only* the active node
+    if (layoutedNodes.length > 0) {
+      const timer = setTimeout(() => {
+        fitView({ duration: 400, minZoom: 0.05 });
+      }, 10); // 10ms delay
+
+      return () => clearTimeout(timer);
+    }
+  }, [layoutedNodes, layoutedEdges, setNodes, setEdges, fitView]);
+
+  // --- FOCUS EFFECT (Camera) ---
   useEffect(() => {
     const allNodes = getNodes();
     if (allNodes.length === 0) return;
@@ -57,29 +80,52 @@ export const GraphView = ({
 
     if (targetNode) {
       fitView({
-        nodes: [{ id: targetNode.id }], // <-- This is the fix. Only fit the single target node.
-        duration: 400, // Animation duration
-        maxZoom: 1.5, // Zoom in a bit closer
+        nodes: [{ id: targetNode.id }],
+        duration: 400,
+        maxZoom: 1.5,
         padding: 0.1,
       });
     }
-  }, [currentSequence, fitView, getNodes, nodes]); // re-run when 'nodes' is populated
-  // --- END UPDATED FOCUS EFFECT ---
+  }, [currentSequence, fitView, getNodes, nodes]);
+  // --- END FOCUS EFFECT ---
 
-  // --- GLOW EFFECT (Styling) ---
-  // This effect applies a 'glowing' class to the active node
+  // 👇 --- THIS EFFECT IS MODIFIED --- 👇
+  // This effect applies a 'glowing' class AND the 'isFocused' prop
   useEffect(() => {
     setNodes((nds) =>
       nds.map((node) => {
-        if (node.data.sequence === currentSequence) {
-          // set classname for the current node
-          return { ...node, className: "glowing" };
-        }
-        // remove classname from all other nodes
-        return { ...node, className: "" };
+        const isFocused = node.data.sequence === currentSequence;
+        return {
+          ...node,
+          className: isFocused ? "glowing" : "",
+          data: { ...node.data, isFocused: isFocused }, // Inject the prop
+        };
       })
     );
   }, [currentSequence, setNodes]); // Rerun when sequence changes or nodes are set
+  // 👆 --- END OF MODIFICATION --- 👆
+
+  // --- CLICK HANDLER ---
+  const handleNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      // Assert the type of node.data inside the function
+      const data = node.data as NodeData;
+
+      const clickedSequence = data.sequence;
+
+      if (typeof clickedSequence === "number") {
+        pausePlayback(); // Stop the animation
+        setCurrentSequence(clickedSequence); // Set the active node
+      }
+
+      // Set the node for inspection
+      if (data.run) {
+        setInspectedNode(data.run);
+      }
+    },
+    [pausePlayback, setCurrentSequence, setInspectedNode]
+  );
+  // --- END CLICK HANDLER ---
 
   if (layoutedNodes.length === 0) {
     return <EmptyState>Select a run to view its graph</EmptyState>;
@@ -93,7 +139,8 @@ export const GraphView = ({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
-        fitView
+        onNodeClick={handleNodeClick}
+        minZoom={0.05}
       >
         <Background />
         <Controls />
