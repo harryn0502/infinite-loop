@@ -17,6 +17,7 @@ class ObsState(TypedDict):
         plan: Planner output steps
         plan_step_index: Current step index within the plan
     """
+
     # LangGraph basic messages (add_messages reducer 사용)
     messages: Annotated[List[AnyMessage], add_messages]
 

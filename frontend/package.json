@@ -12,8 +12,10 @@
   "dependencies": {
     "@xyflow/react": "^12.9.3",
     "dagre": "^0.8.5",
+    "html-to-image": "^1.11.13",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "recharts": "^3.4.1",
     "simple-reset": "^2.1.0",
     "styled-components": "^6.1.19",
     "swr": "^2.3.6"

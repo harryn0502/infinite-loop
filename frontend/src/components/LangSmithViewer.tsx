@@ -14,10 +14,13 @@ import { ReactFlowProvider } from "@xyflow/react";
 // 👇 --- IMPORT NEW MODAL ---
 import { NodeInspectorModal } from "./NodeInspectorModal";
 import type { NestedRunNode } from "../types";
+import { AgentChatBox } from "./AgentChatBox";
+// 👇 --- 1. IMPORT THE NEW EXPANDED LIST ---
+import { ExpandedTraceList } from "./ExpandedTraceList";
 
 type ActiveTab = "graph" | "json";
 
-// --- Styled Components (No Changes) ---
+// --- 2. STYLED COMPONENTS (Updated) ---
 const Wrapper = styled.div`
   display: flex;
   flex-direction: row;
@@ -25,23 +28,48 @@ const Wrapper = styled.div`
   width: 100vw;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   box-sizing: border-box;
+  overflow: hidden; /* Prevent full-page scroll */
 `;
+
 const BaseColumn = styled.div`
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: all 0.3s ease-in-out;
 `;
-const TraceListColumn = styled(BaseColumn)`
-  flex: 1;
-  min-width: 300px;
+
+// 👇 --- Updated TraceListColumn ---
+const TraceListColumn = styled(BaseColumn)<{ $expanded: boolean }>`
+  flex: ${(props) => (props.$expanded ? "100" : "1")};
+  min-width: ${(props) => (props.$expanded ? "100%" : "300px")};
+  max-width: ${(props) => (props.$expanded ? "100%" : "400px")};
   border-right: 1px solid #e0e0e0;
 `;
-const DetailColumn = styled(BaseColumn)`
+
+// 👇 --- Updated DetailColumn ---
+const DetailColumn = styled(BaseColumn)<{ $hidden: boolean }>`
   flex: 2;
   min-width: 400px;
+  /* Hide when list is expanded */
+  display: ${(props) => (props.$hidden ? "none" : "flex")};
 `;
+
+// 👇 --- Updated ChatColumn ---
+const ChatColumn = styled(BaseColumn)<{ $hidden: boolean }>`
+  flex: 1.5;
+  min-width: 350px;
+  border-left: 1px solid #e0e0e0;
+  /* Hide when list is expanded */
+  display: ${(props) => (props.$hidden ? "none" : "flex")};
+`;
+
 const ColumnHeader = styled.div`
+  /* --- Added flex properties --- */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* --------------------------- */
   padding: 12px 16px;
   font-weight: 600;
   font-size: 16px;
@@ -49,11 +77,29 @@ const ColumnHeader = styled.div`
   background-color: #f9f9f9;
   flex-shrink: 0;
 `;
+
+// 👇 --- 3. NEW Expand Button ---
+const ExpandButton = styled.button`
+  border: none;
+  background: transparent;
+  padding: 4px;
+  margin-right: -4px;
+  font-size: 16px;
+  cursor: pointer;
+  color: #555;
+
+  &:hover {
+    color: #000;
+  }
+`;
+
 const ListContainer = styled.div`
   overflow-y: auto;
   flex-grow: 1;
   padding: 8px;
 `;
+
+// --- (Other styled components are unchanged) ---
 const TabHeader = styled.div`
   display: flex;
   border-bottom: 1px solid #e0e0e0;
@@ -138,28 +184,21 @@ const EmptyState = styled.div`
 // --- End Styled Components ---
 
 export const LangSmithViewer = () => {
-  // --- 1. HOOKS & DEBUGGING ---
+  // --- 4. HOOKS & STATE (Updated) ---
   const traceListData = useTraces();
   const { traces: rootNodes, isLoading: isListLoading } = traceListData;
-
-  console.log("Data from useTraces():", traceListData);
-
-  // State for the *ID* of the selected run
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-
-  // Fetch the full nested data for the selected run
   const { trace: selectedRun, isLoading: isTraceLoading } = useNestedTrace(selectedRunId);
-
-  // --- (All other state remains the same) ---
   const [activeTab, setActiveTab] = useState<ActiveTab>("graph");
-  const { nodes, edges, maxSequence } = useFlowData(selectedRun ?? null); // Pass null if undefined
+  const { nodes, edges, maxSequence } = useFlowData(selectedRun ?? null);
   const [currentSequence, setCurrentSequence] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const timerRef = useRef<number | null>(null);
-
-  // 👇 --- ADD NEW STATE ---
   const [inspectedNode, setInspectedNode] = useState<NestedRunNode | null>(null);
-  // 👆 --- END ADDITION ---
+
+  // 👇 --- New state for expanding the list ---
+  const [isTraceListExpanded, setIsTraceListExpanded] = useState(false);
+  // 👆 --- End Addition ---
 
   // --- (Playback logic remains the same) ---
   const pausePlayback = useCallback(() => {
@@ -191,7 +230,7 @@ export const LangSmithViewer = () => {
     };
   }, [isPlaying, maxSequence, pausePlayback]);
 
-  // --- 2. UPDATE HANDLERS ---
+  // --- 5. HANDLERS (Updated) ---
 
   const handleRunSelect = (run: TraceHeader) => {
     // Only update if it's a new run
@@ -200,13 +239,13 @@ export const LangSmithViewer = () => {
     setSelectedRunId(run.run_id);
 
     // --- !! ADDED RESET LOGIC HERE !! ---
-    // This is the correct place to reset state
-    // React will batch these updates with setSelectedRunId
     setCurrentSequence(1);
     pausePlayback();
-    // --- !! END ADDITION !! ---
+    // 👇 --- New logic: auto-collapse when a trace is selected ---
+    setIsTraceListExpanded(false);
   };
 
+  // --- (Other handlers remain the same) ---
   const handlePlay = () => {
     if (currentSequence === maxSequence) {
       setCurrentSequence(1);
@@ -237,29 +276,47 @@ export const LangSmithViewer = () => {
     return JSON.stringify(truncatedObj, null, 2);
   }, [selectedRun]);
 
+  // --- 6. RENDER LOGIC (Updated) ---
   return (
     <Wrapper>
-      <TraceListColumn>
-        <ColumnHeader>Traces</ColumnHeader>
-        <ListContainer>
-          {isListLoading && <EmptyState>Loading traces...</EmptyState>}
+      <TraceListColumn $expanded={isTraceListExpanded}>
+        <ColumnHeader>
+          <span>Traces</span>
+          {/* --- Add the button --- */}
+          <ExpandButton
+            onClick={() => setIsTraceListExpanded(!isTraceListExpanded)}
+            title={isTraceListExpanded ? "Collapse" : "Expand"}
+          >
+            {isTraceListExpanded ? "Collapse" : "Expand"}
+          </ExpandButton>
+        </ColumnHeader>
 
-          {/* --- 3. ADDED DEFENSIVE CHECK --- */}
-          {/* We now also check if rootNodes is *actually* an array */}
-          {Array.isArray(rootNodes)
-            ? rootNodes.map((run) => (
-                <RunNode
-                  key={run.run_id}
-                  run={run}
-                  onSelect={handleRunSelect}
-                  selectedRunId={selectedRunId}
-                />
-              ))
-            : !isListLoading && <EmptyState>No traces found.</EmptyState>}
-          {/* --- END DEFENSIVE CHECK --- */}
-        </ListContainer>
+        {/* --- Conditionally render list component --- */}
+        {isTraceListExpanded ? (
+          <ExpandedTraceList
+            traces={rootNodes || []}
+            selectedRunId={selectedRunId}
+            onSelectTrace={handleRunSelect}
+          />
+        ) : (
+          <ListContainer>
+            {isListLoading && <EmptyState>Loading traces...</EmptyState>}
+            {Array.isArray(rootNodes)
+              ? rootNodes.map((run) => (
+                  <RunNode
+                    key={run.run_id}
+                    run={run}
+                    onSelect={handleRunSelect}
+                    selectedRunId={selectedRunId}
+                  />
+                ))
+              : !isListLoading && <EmptyState>No traces found.</EmptyState>}
+          </ListContainer>
+        )}
       </TraceListColumn>
-      <DetailColumn>
+
+      {/* --- Pass $hidden prop to other columns --- */}
+      <DetailColumn $hidden={isTraceListExpanded}>
         <TabHeader>
           <TabButton $active={activeTab === "graph"} onClick={() => setActiveTab("graph")}>
             Graph
@@ -325,6 +382,10 @@ export const LangSmithViewer = () => {
             ))}
         </DetailContainer>
       </DetailColumn>
+
+      <ChatColumn $hidden={isTraceListExpanded}>
+        <AgentChatBox />
+      </ChatColumn>
 
       {/* 👇 --- ADD MODAL RENDER --- 👇 */}
       {inspectedNode && (

@@ -10,8 +10,8 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.observability_agent import build_graph, run_obs_agent
-from tutorials.holistic_ai_bedrock import get_chat_model
+from observability_agent import build_graph, run_obs_agent
+from backend.observability_agent.holistic_ai_bedrock import get_chat_model
 
 
 def main():

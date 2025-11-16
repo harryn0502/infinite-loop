@@ -10,7 +10,7 @@ from langchain_core.tools import StructuredTool
 
 
 # Database path relative to project root
-DB_PATH = Path(__file__).parent.parent.parent.parent / "backend" / "agent_debug_db.sqlite"
+DB_PATH = Path("/app/data/agent_debug_db.sqlite")
 
 
 def _ensure_limit(sql: str, default_limit: int = 100) -> str:
@@ -25,15 +25,15 @@ def _ensure_limit(sql: str, default_limit: int = 100) -> str:
         SQL with LIMIT clause
     """
     # Check if LIMIT already exists (case-insensitive)
-    if not re.search(r'\bLIMIT\b', sql, re.IGNORECASE):
+    if not re.search(r"\bLIMIT\b", sql, re.IGNORECASE):
         # Add LIMIT at the end
-        sql = sql.rstrip(';').strip() + f' LIMIT {default_limit}'
+        sql = sql.rstrip(";").strip() + f" LIMIT {default_limit}"
     return sql
 
 
 def _extract_limit_value(sql: str) -> Optional[int]:
     """Extract LIMIT value if present."""
-    match = re.search(r'\bLIMIT\s+(\d+)', sql, re.IGNORECASE)
+    match = re.search(r"\bLIMIT\s+(\d+)", sql, re.IGNORECASE)
     if match:
         try:
             return int(match.group(1))
@@ -70,12 +70,11 @@ def run_sql(sql: str) -> Dict[str, Any]:
     # Check database exists
     if not DB_PATH.exists():
         raise FileNotFoundError(
-            f"Database not found at {DB_PATH}. "
-            f"Expected: backend/agent_debug_db.sqlite"
+            f"Database not found at {DB_PATH}. " f"Expected: backend/agent_debug_db.sqlite"
         )
 
     original_sql = sql
-    had_limit = bool(re.search(r'\bLIMIT\b', original_sql, re.IGNORECASE))
+    had_limit = bool(re.search(r"\bLIMIT\b", original_sql, re.IGNORECASE))
 
     # Ensure query has LIMIT for safety
     sql = _ensure_limit(sql)
@@ -112,7 +111,7 @@ def run_sql(sql: str) -> Dict[str, Any]:
             "original_sql": original_sql,
             "rows_returned": len(rows),
             "columns_returned": len(columns),
-            "limit_applied": bool(re.search(r'\bLIMIT\b', sql, re.IGNORECASE)),
+            "limit_applied": bool(re.search(r"\bLIMIT\b", sql, re.IGNORECASE)),
             "auto_limit_added": not had_limit,
             "limit_value": _extract_limit_value(sql),
             "execution_ms": round(latency_ms, 3),
