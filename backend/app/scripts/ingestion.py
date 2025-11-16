@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 # Make sure this import is correct based on your project structure
 # If main.py is in the root, and this is in /scripts, it should be:
 # from .create_db import ensure_schema, DB_PATH
-from scripts.create_db import ensure_schema, DB_PATH
+from app.scripts.create_db import ensure_schema, DB_PATH
 
 
 def safe_get(d: Dict[str, Any], path: List[Any], default: Any = None) -> Any:

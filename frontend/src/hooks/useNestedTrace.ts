@@ -10,7 +10,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 export const useNestedTrace = (traceId: string | null) => {
   // SWR automatically fetches when traceId is not null
   const { data, error, isLoading } = useSWR<NestedRunNode>(
-    traceId ? `http://localhost:8000/trace_nested/${traceId}` : null,
+    traceId ? `/api/trace_nested/${traceId}` : null,
     fetcher
   );
 

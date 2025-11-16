@@ -17,7 +17,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
  */
 export const useTraces = () => {
   const { data, error, isLoading } = useSWR<TraceHeader[]>(
-    "http://localhost:8000/traces", // Your FastAPI endpoint
+    "/api/traces", // Your FastAPI endpoint
     fetcher,
     {
       refreshInterval: 10000,

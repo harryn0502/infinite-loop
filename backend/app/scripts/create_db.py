@@ -13,7 +13,7 @@ used for storing LangSmith trace data in a unified schema.
 
 # This path is now relative to the CWD (which is /backend when you run uvicorn)
 # This will place the DB next to main.py
-DB_PATH = "agent_debug_db.sqlite"
+DB_PATH = "/app/data/agent_debug_db.sqlite"
 
 # SQL DDL for the tables. We drop existing tables to ensure the schema
 # matches exactly.

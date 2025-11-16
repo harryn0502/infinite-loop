@@ -3,9 +3,8 @@ import os
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware  # Import CORS
-from datetime import datetime
-from scripts.ingestion import ingest_dict
-from scripts.create_db import DB_PATH
+from app.scripts.ingestion import ingest_dict
+from app.scripts.create_db import DB_PATH
 
 # 1. Initialize the FastAPI app
 app = FastAPI()
