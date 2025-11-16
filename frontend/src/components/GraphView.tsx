@@ -37,10 +37,8 @@ export const GraphView = ({
   const { fitView, getNodes } = useReactFlow();
 
   // Set up React Flow state
-  // --- FIX: Provide explicit types to the hooks ---
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  // --- END FIX ---
 
   // Update state when the layout changes (i.e., new run selected)
   useEffect(() => {
@@ -48,22 +46,25 @@ export const GraphView = ({
     setEdges(layoutedEdges);
   }, [layoutedNodes, layoutedEdges, setNodes, setEdges]);
 
-  // --- FOCUS EFFECT (Camera) ---
-  // This effect traces the sequence
+  // --- UPDATED FOCUS EFFECT (Camera) ---
+  // This effect now centers *only* the active node
   useEffect(() => {
     const allNodes = getNodes();
     if (allNodes.length === 0) return;
 
+    // Find the currently active node
     const targetNode = allNodes.find((n) => n.data.sequence === currentSequence);
 
     if (targetNode) {
       fitView({
-        nodes: [{ id: targetNode.id }],
-        duration: 400,
-        maxZoom: 1.2, // Zoom in a bit
+        nodes: [{ id: targetNode.id }], // <-- This is the fix. Only fit the single target node.
+        duration: 400, // Animation duration
+        maxZoom: 1.5, // Zoom in a bit closer
+        padding: 0.1,
       });
     }
   }, [currentSequence, fitView, getNodes, nodes]); // re-run when 'nodes' is populated
+  // --- END UPDATED FOCUS EFFECT ---
 
   // --- GLOW EFFECT (Styling) ---
   // This effect applies a 'glowing' class to the active node

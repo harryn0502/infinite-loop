@@ -1,23 +1,17 @@
-import { useState } from "react";
 import styled from "styled-components";
-import { type NestedRunNode } from "../types";
-import { calculateDuration, getRunIcon } from "../utils/format";
+// Import the new hook's type
+import { type TraceHeader } from "../hooks/useTraces";
+import { getRunIcon } from "../utils/format";
 
 interface RunNodeProps {
-  run: NestedRunNode;
-  onSelect: (run: NestedRunNode) => void;
+  run: TraceHeader; // Use the new type
+  onSelect: (run: TraceHeader) => void; // Use the new type
   selectedRunId?: string | null;
 }
 
 export const RunNode: React.FC<RunNodeProps> = ({ run, onSelect, selectedRunId }) => {
-  const [isExpanded, setIsExpanded] = useState(true); // Default to expanded
-  const hasChildren = run.children.length > 0;
-  const isSelected = run.id === selectedRunId;
-
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent selection when toggling
-    setIsExpanded(!isExpanded);
-  };
+  // Removed all logic for expansion and children
+  const isSelected = run.run_id === selectedRunId;
 
   const handleSelect = () => {
     onSelect(run);
@@ -26,18 +20,13 @@ export const RunNode: React.FC<RunNodeProps> = ({ run, onSelect, selectedRunId }
   return (
     <NodeWrapper>
       <NodeRow $active={isSelected} onClick={handleSelect}>
-        <Toggle onClick={handleToggle}>{hasChildren ? (isExpanded ? "▼" : "►") : ""}</Toggle>
-        <Icon>{getRunIcon(run.run_type)}</Icon>
+        <Toggle /> {/* Kept for alignment, but empty */}
+        {/* Assume 'chain' icon for all root runs */}
+        <Icon>{getRunIcon("chain")}</Icon>
         <Name>{run.name}</Name>
-        <Duration>{calculateDuration(run.start_time, run.end_time)}</Duration>
+        {/* Use the status from the API */}
+        <Status $status={run.status}>{run.status}</Status>
       </NodeRow>
-      {isExpanded && hasChildren && (
-        <ChildrenContainer>
-          {run.children.map((child) => (
-            <RunNode key={child.id} run={child} onSelect={onSelect} selectedRunId={selectedRunId} />
-          ))}
-        </ChildrenContainer>
-      )}
     </NodeWrapper>
   );
 };
@@ -66,7 +55,6 @@ const Toggle = styled.span`
   text-align: center;
   font-size: 10px;
   color: #757575;
-  cursor: pointer;
 `;
 
 const Icon = styled.span`
@@ -80,13 +68,14 @@ const Name = styled.span`
   white-space: nowrap;
 `;
 
-const Duration = styled.span`
+// Replaced Duration with Status, as end_time isn't in the /traces response
+const Status = styled.span<{ $status: string }>`
   font-size: 13px;
-  color: #757575;
+  color: ${(props) => (props.$status === "success" ? "#2e7d32" : "#c62828")};
   margin-left: auto;
   padding-right: 8px;
+  font-weight: 600;
+  text-transform: capitalize;
 `;
 
-const ChildrenContainer = styled.div`
-  padding-left: 20px; // This creates the nesting effect
-`;
+// ChildrenContainer is no longer needed

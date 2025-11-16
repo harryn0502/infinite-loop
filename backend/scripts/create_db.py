@@ -11,11 +11,12 @@ used for storing LangSmith trace data in a unified schema.
   * `call_chain` — one row per chain/graph node call.
 """
 
-# --- MODIFIED LINE ---
 # This path is now relative to the CWD (which is /backend when you run uvicorn)
 # This will place the DB next to main.py
 DB_PATH = "agent_debug_db.sqlite"
 
+# SQL DDL for the tables. We drop existing tables to ensure the schema
+# matches exactly.
 # SQL DDL for the tables. We drop existing tables to ensure the schema
 # matches exactly.
 SCHEMA_SQL = """
@@ -27,6 +28,7 @@ DROP TABLE IF EXISTS call_chain;
 
 CREATE TABLE agent_runs (
     run_id TEXT PRIMARY KEY,
+    name TEXT,
     start_time TEXT,
     end_time TEXT,
     status TEXT,
@@ -49,6 +51,8 @@ CREATE TABLE call_model (
     run_id TEXT,
     step_index INTEGER,
     previous_step_id TEXT,
+    start_time TEXT, -- <-- ADDED
+    end_time TEXT, -- <-- ADDED
 
     -- LLM step fields
     prompt_text TEXT,
@@ -65,8 +69,6 @@ CREATE TABLE call_model (
     tool_call_requests JSON,
 
     FOREIGN KEY(run_id) REFERENCES agent_runs(run_id)
-    -- Note: We cannot have a FOREIGN KEY on previous_step_id as it could
-    -- reference any of the three 'call_*' tables.
 );
 
 CREATE TABLE call_tool (
@@ -74,6 +76,8 @@ CREATE TABLE call_tool (
     run_id TEXT,
     step_index INTEGER,
     previous_step_id TEXT,
+    start_time TEXT, -- <-- ADDED
+    end_time TEXT, -- <-- ADDED
 
     -- Tool step fields
     tool_name TEXT,
@@ -92,6 +96,8 @@ CREATE TABLE call_chain (
     run_id TEXT,
     step_index INTEGER,
     previous_step_id TEXT,
+    start_time TEXT, -- <-- ADDED
+    end_time TEXT, -- <-- ADDED
 
     -- Chain step fields
     chain_name TEXT,

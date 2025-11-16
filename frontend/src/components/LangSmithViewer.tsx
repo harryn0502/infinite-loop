@@ -1,7 +1,10 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react"; // Import useCallback
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import styled from "styled-components";
-import { useTraceTree } from "../hooks/useTraceTree";
-import { type NestedRunNode } from "../types";
+
+// --- IMPORT NEW HOOKS ---
+import { useTraces, type TraceHeader } from "../hooks/useTraces";
+import { useNestedTrace } from "../hooks/useNestedTrace";
+
 import { RunNode } from "./RunNode";
 import { truncateJsonValues } from "../utils/format";
 import { GraphView } from "./GraphView";
@@ -10,7 +13,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 
 type ActiveTab = "graph" | "json";
 
-// --- Styled Components (Moved Up) ---
+// --- Styled Components (No Changes) ---
 const Wrapper = styled.div`
   display: flex;
   flex-direction: row;
@@ -19,25 +22,21 @@ const Wrapper = styled.div`
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   box-sizing: border-box;
 `;
-// ... (all other styled components) ...
 const BaseColumn = styled.div`
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 `;
-
 const TraceListColumn = styled(BaseColumn)`
   flex: 1;
   min-width: 300px;
   border-right: 1px solid #e0e0e0;
 `;
-
 const DetailColumn = styled(BaseColumn)`
   flex: 2;
   min-width: 400px;
 `;
-
 const ColumnHeader = styled.div`
   padding: 12px 16px;
   font-weight: 600;
@@ -46,13 +45,11 @@ const ColumnHeader = styled.div`
   background-color: #f9f9f9;
   flex-shrink: 0;
 `;
-
 const ListContainer = styled.div`
   overflow-y: auto;
   flex-grow: 1;
   padding: 8px;
 `;
-
 const TabHeader = styled.div`
   display: flex;
   border-bottom: 1px solid #e0e0e0;
@@ -60,7 +57,6 @@ const TabHeader = styled.div`
   background-color: #f9f9f9;
   flex-shrink: 0;
 `;
-
 const TabButton = styled.button<{ $active: boolean }>`
   padding: 10px 16px;
   font-size: 14px;
@@ -72,7 +68,6 @@ const TabButton = styled.button<{ $active: boolean }>`
   border-bottom: 2px solid ${(props) => (props.$active ? "#0d47a1" : "transparent")};
   margin-bottom: -1px;
 `;
-
 const TracerControls = styled.div`
   display: flex;
   align-items: center;
@@ -83,7 +78,6 @@ const TracerControls = styled.div`
   flex-shrink: 0;
   gap: 12px;
 `;
-
 const TracerButton = styled.button`
   padding: 4px 12px;
   font-size: 14px;
@@ -107,12 +101,10 @@ const TracerButton = styled.button`
     cursor: not-allowed;
   }
 `;
-
 const Slider = styled.input`
   flex-grow: 1;
   margin: 0 8px;
 `;
-
 const SequenceDisplay = styled.span`
   font-size: 14px;
   font-weight: 600;
@@ -120,7 +112,6 @@ const SequenceDisplay = styled.span`
   min-width: 50px;
   text-align: right;
 `;
-
 const DetailContainer = styled.div`
   overflow: auto;
   flex-grow: 1;
@@ -134,75 +125,85 @@ const DetailContainer = styled.div`
     word-wrap: break-word;
   }
 `;
-
 const EmptyState = styled.div`
   padding-top: 16px;
   padding-left: 16px;
   color: #757575;
   font-style: italic;
 `;
+// --- End Styled Components ---
 
 export const LangSmithViewer = () => {
-  const rootNodes = useTraceTree();
-  const [selectedRun, setSelectedRun] = useState<NestedRunNode | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("graph");
+  // --- 1. HOOKS & DEBUGGING ---
+  const traceListData = useTraces();
+  const { traces: rootNodes, isLoading: isListLoading } = traceListData;
 
-  const { nodes, edges, maxSequence } = useFlowData(selectedRun);
+  console.log("Data from useTraces():", traceListData);
+
+  // State for the *ID* of the selected run
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  // Fetch the full nested data for the selected run
+  const { trace: selectedRun, isLoading: isTraceLoading } = useNestedTrace(selectedRunId);
+
+  // --- (All other state remains the same) ---
+  const [activeTab, setActiveTab] = useState<ActiveTab>("graph");
+  const { nodes, edges, maxSequence } = useFlowData(selectedRun ?? null); // Pass null if undefined
   const [currentSequence, setCurrentSequence] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const timerRef = useRef<number | null>(null);
 
-  // --- FIX 1: Wrap pausePlayback in useCallback ---
-  // We memoize it so it can be safely used in the useEffect dependency array.
+  // --- (Playback logic remains the same) ---
   const pausePlayback = useCallback(() => {
     setIsPlaying(false);
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
-  }, [setIsPlaying]); // setIsPlaying is a stable function
+  }, [setIsPlaying]);
 
-  // Main playback logic
   useEffect(() => {
-    // This logic now *only* runs when isPlaying is true
     if (isPlaying) {
-      // Set up new timer
       timerRef.current = window.setInterval(() => {
         setCurrentSequence((s) => {
           if (s < maxSequence) {
             return s + 1;
           } else {
-            // Auto-pause at the end
             pausePlayback();
             return s;
           }
         });
       }, 800);
     }
-    // --- FIX 1: The 'else' block that called pausePlayback() is removed ---
-
-    // The cleanup function handles *all* timer clearing.
-    // It runs when isPlaying becomes false OR when the component unmounts.
     return () => {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
         timerRef.current = null;
       }
     };
-  }, [isPlaying, maxSequence, pausePlayback]); // Add pausePlayback as a dependency
+  }, [isPlaying, maxSequence, pausePlayback]);
 
-  // --- FIX 2: This useEffect is REMOVED ---
+  // --- 2. UPDATE HANDLERS ---
+
+  // --- !! REMOVED THE PROBLEMATIC USEEFFECT !! ---
   // useEffect(() => {
   //   setCurrentSequence(1);
-  //   pausePlayback(); // Stop playback
-  // }, [selectedRun]);
+  //   pausePlayback();
+  // }, [selectedRun, pausePlayback]);
+  // --- !! END REMOVAL !! ---
 
-  // --- FIX 2: Create a new event handler ---
-  // This function batches all state updates into one, avoiding the 2-render problem
-  const handleRunSelect = (run: NestedRunNode) => {
-    setSelectedRun(run);
+  const handleRunSelect = (run: TraceHeader) => {
+    // Only update if it's a new run
+    if (run.run_id === selectedRunId) return;
+
+    setSelectedRunId(run.run_id);
+
+    // --- !! ADDED RESET LOGIC HERE !! ---
+    // This is the correct place to reset state
+    // React will batch these updates with setSelectedRunId
     setCurrentSequence(1);
-    pausePlayback(); // This resets the player state
+    pausePlayback();
+    // --- !! END ADDITION !! ---
   };
 
   const handlePlay = () => {
@@ -237,15 +238,21 @@ export const LangSmithViewer = () => {
       <TraceListColumn>
         <ColumnHeader>Traces</ColumnHeader>
         <ListContainer>
-          {rootNodes.map((run) => (
-            <RunNode
-              key={run.id}
-              run={run}
-              // --- FIX 2: Use the new handler ---
-              onSelect={handleRunSelect}
-              selectedRunId={selectedRun?.id}
-            />
-          ))}
+          {isListLoading && <EmptyState>Loading traces...</EmptyState>}
+
+          {/* --- 3. ADDED DEFENSIVE CHECK --- */}
+          {/* We now also check if rootNodes is *actually* an array */}
+          {Array.isArray(rootNodes)
+            ? rootNodes.map((run) => (
+                <RunNode
+                  key={run.run_id}
+                  run={run}
+                  onSelect={handleRunSelect}
+                  selectedRunId={selectedRunId}
+                />
+              ))
+            : !isListLoading && <EmptyState>No traces found.</EmptyState>}
+          {/* --- END DEFENSIVE CHECK --- */}
         </ListContainer>
       </TraceListColumn>
       <DetailColumn>
@@ -276,7 +283,6 @@ export const LangSmithViewer = () => {
             <TracerButton onClick={handleStop} title="Stop (Reset)">
               &#9632;
             </TracerButton>
-
             <Slider
               type="range"
               min="1"
@@ -284,7 +290,6 @@ export const LangSmithViewer = () => {
               value={currentSequence}
               onChange={handleSliderChange}
             />
-
             <SequenceDisplay>
               {currentSequence} / {maxSequence}
             </SequenceDisplay>
@@ -292,13 +297,16 @@ export const LangSmithViewer = () => {
         )}
 
         <DetailContainer>
-          {activeTab === "graph" && (
+          {isTraceLoading && <EmptyState>Loading trace details...</EmptyState>}
+
+          {!isTraceLoading && activeTab === "graph" && (
             <ReactFlowProvider>
               <GraphView nodes={nodes} edges={edges} currentSequence={currentSequence} />
             </ReactFlowProvider>
           )}
 
-          {activeTab === "json" &&
+          {!isTraceLoading &&
+            activeTab === "json" &&
             (selectedRun ? (
               <pre>{truncatedJson}</pre>
             ) : (

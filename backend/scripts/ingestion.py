@@ -200,11 +200,13 @@ def ingest_session(runs: List[Dict[str, Any]], trace_id: str) -> None:
         )
 
     # Sort runs chronologically by start_time for ordering
-    sorted_runs = sorted(runs, key=lambda r: r.get("start_time"))
+    # Add a fallback for runs that might be missing start_time
+    sorted_runs = sorted(runs, key=lambda r: r.get("start_time") or "1970-01-01T00:00:00")
 
     start_time = root_run.get("start_time")
     end_time = root_run.get("end_time")
     session_id = root_run.get("session_id") or root_run.get("trace_id")
+    name = root_run.get("name")
 
     # Determine status and collect error messages across ALL runs
     status = "success"
@@ -253,13 +255,14 @@ def ingest_session(runs: List[Dict[str, Any]], trace_id: str) -> None:
     cur = conn.cursor()
     cur.execute(
         """INSERT OR REPLACE INTO agent_runs (
-            run_id, start_time, end_time, status, error,
+            run_id, name, start_time, end_time, status, error,
             user_id, session_id, thread_id, input_messages, output_messages,
             model_name, tags, langgraph_metadata, runtime,
             total_tokens, total_cost
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             trace_id,  # Use the common trace_id as the primary run_id
+            name,
             start_time,
             end_time,
             status,
@@ -301,19 +304,27 @@ def ingest_session(runs: List[Dict[str, Any]], trace_id: str) -> None:
         parent_id = get_direct_parent_id(run) or previous_step_id
 
         # Common fields for all step types
-        common_values = (step_id, trace_id, idx, parent_id)
+        common_values = (
+            step_id,
+            trace_id,
+            idx,
+            parent_id,
+            run.get("start_time"),  # <-- ADDED
+            run.get("end_time"),  # <-- ADDED
+        )
 
         if run_type == "llm":
             llm_fields = parse_llm_step(run)
             cur.execute(
                 """INSERT OR REPLACE INTO call_model (
                     step_id, run_id, step_index, previous_step_id,
+                    start_time, end_time,
                     prompt_text, llm_output_text,
                     llm_input_tokens, llm_output_tokens, llm_total_tokens,
                     llm_prompt_cost, llm_completion_cost, llm_total_cost,
                     finish_reason, model_name, model_provider,
                     tool_call_requests
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 common_values
                 + (
                     llm_fields["prompt_text"],
@@ -339,10 +350,11 @@ def ingest_session(runs: List[Dict[str, Any]], trace_id: str) -> None:
             cur.execute(
                 """INSERT OR REPLACE INTO call_tool (
                     step_id, run_id, step_index, previous_step_id,
+                    start_time, end_time,
                     tool_name, tool_args, tool_status,
                     tool_response, tool_message_content,
                     tool_cost, tool_latency_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 common_values
                 + (
                     tool_fields["tool_name"],
@@ -363,10 +375,11 @@ def ingest_session(runs: List[Dict[str, Any]], trace_id: str) -> None:
             cur.execute(
                 """INSERT OR REPLACE INTO call_chain (
                     step_id, run_id, step_index, previous_step_id,
+                    start_time, end_time,
                     chain_name, chain_status, chain_input_messages, chain_output_messages,
                     chain_prompt_tokens, chain_completion_tokens, chain_total_tokens,
                     chain_prompt_cost, chain_completion_cost, chain_total_cost
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 common_values
                 + (
                     chain_fields["chain_name"],
