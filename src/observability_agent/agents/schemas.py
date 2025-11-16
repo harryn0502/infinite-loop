@@ -1,6 +1,6 @@
 """Structured output schemas for all agents with reasoning fields."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 from ..core.state import AgentName
 
@@ -57,13 +57,17 @@ class PlanStep(BaseModel):
     step_number: int = Field(
         description="1-based ordering of the step"
     )
+    name: Optional[str] = Field(
+        default=None,
+        description="Optional identifier for the step (useful for diagnostics mode)."
+    )
     agent: AgentName = Field(
         description="Agent name to execute this step (metrics_agent, chart_agent, etc.)"
     )
     objective: str = Field(
         description="Goal of this step"
     )
-    input_context: str = Field(
+    input_context: Union[str, Dict[str, Any]] = Field(
         description="Important context or data required for this step"
     )
     success_criteria: str = Field(
@@ -76,6 +80,10 @@ class PlannerResponse(BaseModel):
 
     summary: str = Field(
         description="High-level description of the plan"
+    )
+    analysis_type: Literal["default", "visualization", "diagnostics"] = Field(
+        default="default",
+        description="Special plan modes that downstream agents may use to adjust behavior"
     )
     steps: List[PlanStep] = Field(
         description="Ordered list of steps to execute"

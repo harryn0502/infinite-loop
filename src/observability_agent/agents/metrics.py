@@ -1,17 +1,19 @@
 """Metrics agent for Text2SQL analytics queries."""
 
 import re
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from ..core.state import ObsState
+from ..core.state_utils import agent_state_update
 from ..tools import (
     get_observability_schema_tool,
     run_sql_tool,
 )
 from .schemas import MetricsSQLResponse, MetricsSummaryResponse
+from ..utils.diagnostics import build_diagnostics_sql_goal
 
 MAX_METADATA_ROWS = 20
 MAX_SQL_ATTEMPTS = 3
@@ -142,13 +144,37 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
     plan_steps = state.get("plan", []) or []
     plan_index = state.get("plan_step_index", 0)
     planner_step = plan_steps[plan_index] if plan_steps and plan_index < len(plan_steps) else None
+    plan_mode = state.get("plan_mode", "default")
+    diagnostics_ctx = state.get("diagnostics_context", {})
     planner_hint = None
+    diagnostics_goal = None
+    diagnostics_instruction = None
+    updated_diagnostics_context: Optional[Dict[str, Any]] = None
     if planner_step:
+        input_context = planner_step.get("input_context", "")
+        if isinstance(input_context, dict):
+            metric = input_context.get("metric", "latency")
+            mode = input_context.get("mode", "overall")
+            baseline_hours = int(input_context.get("baseline_hours") or diagnostics_ctx.get("baseline_window_hours", 24))
+            recent_hours = int(input_context.get("recent_hours") or diagnostics_ctx.get("recent_window_hours", 24))
+            if plan_mode == "diagnostics":
+                diagnostics_goal = build_diagnostics_sql_goal(metric, mode, baseline_hours, recent_hours)
+                diagnostics_instruction = HumanMessage(
+                    content=(
+                        "Diagnostics SQL goal:\n"
+                        f"{diagnostics_goal}\n\n"
+                        f"baseline_hours={baseline_hours}, recent_hours={recent_hours}"
+                    )
+                )
+            input_context_repr = str(input_context)
+        else:
+            input_context_repr = input_context
+
         planner_hint = HumanMessage(
             content=(
                 "Planner instruction for this step:\n"
                 f"Objective: {planner_step.get('objective', '')}\n"
-                f"Required context: {planner_step.get('input_context', '')}\n"
+                f"Required context: {input_context_repr}\n"
                 f"Success criteria: {planner_step.get('success_criteria', '')}"
             )
         )
@@ -174,7 +200,10 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
 
     # 1st LLM call: 자연어 → SQL with structured output
     planner_messages = [planner_hint] if planner_hint else []
+    if diagnostics_instruction:
+        planner_messages.append(diagnostics_instruction)
     messages = [system] + planner_messages + state["messages"]
+    request_text = diagnostics_goal or user_message.content
     llm_with_structure = llm.with_structured_output(MetricsSQLResponse)
     sql_response = llm_with_structure.invoke(messages)
 
@@ -182,12 +211,12 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         sql_response,
         llm_with_structure,
         messages,
-        user_message.content,
+        request_text,
         run_sql_tool,
         config,
     )
 
-    draft, sql_generation_metadata = _build_sql_message(sql_response, sql, user_message.content)
+    draft, sql_generation_metadata = _build_sql_message(sql_response, sql, request_text)
 
     if sql_result is None:
         error_metadata = {
@@ -207,14 +236,13 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
                 "agent_metadata": error_metadata,
             },
         )
-        return {
-            "messages": [draft, error_msg],
-            "active_agent": "metrics_agent",
-            "last_rows": state.get("last_rows", []),
-            "chart_context": state.get("chart_context", {"rows": state.get("last_rows", []), "metadata": {}}),
-            "plan": plan_steps,
-            "plan_step_index": plan_index + 1,
-        }
+        return agent_state_update(
+            state,
+            messages=[draft, error_msg],
+            active_agent="metrics_agent",
+            plan=plan_steps,
+            plan_step_index=plan_index + 1,
+        )
 
     # rows를 dict 리스트로 변환해서 state에 저장
     columns = sql_result["columns"]
@@ -230,6 +258,15 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         "metadata": {},
         "raw_rows": row_dicts,
     }
+
+    if plan_mode == "diagnostics" and planner_step:
+        step_name = planner_step.get("name") or f"step_{plan_index + 1}"
+        updated_diagnostics_context = store_diagnostics_result(
+            state,
+            step_name=step_name,
+            description=planner_step.get("objective", ""),
+            rows=row_dicts,
+        )
 
     # 결과 요약 프롬프트 with structured output
     result_system = SystemMessage(
@@ -249,7 +286,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
     )
     result_user = HumanMessage(
         content=(
-            f"User question: {user_message.content}\n\n"
+            f"User question: {request_text}\n\n"
             f"Executed SQL:\n{sql}\n\n"
             f"Result columns: {columns}\n"
             f"Result rows: {rows}"
@@ -278,11 +315,42 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         }
     )
 
-    return {
-        "messages": [draft, summary],  # SQL 생성 답변 + 요약 답변 모두 추가
-        "active_agent": "metrics_agent",
-        "last_rows": row_dicts,
-        "chart_context": chart_context,
-        "plan": plan_steps,
-        "plan_step_index": plan_index + 1,
-    }
+    next_step_index = plan_index + 1
+    if (
+        plan_mode == "diagnostics"
+        and planner_step
+        and (planner_step.get("name") == "overall_change")
+        and not row_dicts
+    ):
+        next_step_index = max(len(plan_steps) - 1, next_step_index)
+
+    return agent_state_update(
+        state,
+        messages=[draft, summary],
+        active_agent="metrics_agent",
+        last_rows=row_dicts,
+        chart_context=chart_context,
+        plan=plan_steps,
+        plan_step_index=next_step_index,
+        diagnostics_context=updated_diagnostics_context or state.get("diagnostics_context", {}),
+    )
+
+
+def store_diagnostics_result(
+    state: ObsState,
+    step_name: str,
+    description: str,
+    rows: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Persist diagnostics results so the summary agent can read them later."""
+    ctx = state.get("diagnostics_context") or {}
+    existing_results = ctx.get("results") or []
+    existing_results.append(
+        {
+            "name": step_name,
+            "description": description,
+            "rows": rows,
+        }
+    )
+    ctx["results"] = existing_results
+    return ctx

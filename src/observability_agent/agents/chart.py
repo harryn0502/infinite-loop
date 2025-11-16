@@ -4,6 +4,7 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ..core.state import ObsState
+from ..core.state_utils import agent_state_update
 from ..tools import prepare_chart_data_tool
 from .schemas import ChartSpecResponse
 
@@ -53,14 +54,15 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
                 "then I can turn that into a chart."
             )
         )
-        return {
-            "messages": [msg],
-            "active_agent": "chart_agent",
-            "last_rows": last_rows,
-            "chart_context": chart_context,
-            "plan": plan_steps,
-            "plan_step_index": plan_index + 1,
-        }
+        return agent_state_update(
+            state,
+            messages=[msg],
+            active_agent="chart_agent",
+            last_rows=last_rows,
+            chart_context=chart_context,
+            plan=plan_steps,
+            plan_step_index=plan_index + 1,
+        )
 
     if not chart_meta:
         try:
@@ -136,11 +138,12 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
         "raw_rows": raw_rows or chart_data,
     }
 
-    return {
-        "messages": [spec_msg],
-        "active_agent": "chart_agent",
-        "last_rows": raw_rows or state.get("last_rows", []),
-        "chart_context": new_chart_context,
-        "plan": plan_steps,
-        "plan_step_index": plan_index + 1,
-    }
+    return agent_state_update(
+        state,
+        messages=[spec_msg],
+        active_agent="chart_agent",
+        last_rows=raw_rows or state.get("last_rows", []),
+        chart_context=new_chart_context,
+        plan=plan_steps,
+        plan_step_index=plan_index + 1,
+    )

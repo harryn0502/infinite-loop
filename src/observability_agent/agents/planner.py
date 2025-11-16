@@ -1,9 +1,16 @@
 """Planner agent responsible for decomposing user goals into agent steps."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage, SystemMessage
 
-from ..core.state import ObsState
+from ..core.state import ClarificationState, ObsState
+from ..utils.diagnostics import (
+    DEFAULT_DIAGNOSTIC_WINDOW_HOURS,
+    extract_window_from_hints,
+    extract_window_hours_from_text,
+    infer_target_metric,
+    DIAGNOSTICS_STEP_SPECS,
+)
 from .schemas import PlannerResponse, PlanStep
 
 
@@ -81,64 +88,142 @@ def _default_plan(state: Optional[ObsState] = None) -> List[dict]:
     return steps
 
 
-def planner_agent_node(state: ObsState, llm) -> ObsState:
-    """Create a plan describing which agents should run and in what order."""
+def _latest_user_text(state: ObsState) -> str:
+    for message in reversed(state.get("messages", [])):
+        if getattr(message, "type", "") == "human" and isinstance(message.content, str):
+            return message.content
+    return ""
 
-    system = SystemMessage(
-        content=(
-            "You are a planning agent for an observability analytics assistant.\n"
-            "Break the user's goal into clear steps using the available agents.\n"
-            "Rules:\n"
-            "- Only use these agents: metrics_agent, chart_agent.\n"
-            "- metrics_agent already knows how to fetch schema, run SQL, and prepare chart data.\n"
-            "- chart_agent relies on the latest rows/chart context produced by metrics_agent.\n"
-            "- Always order steps logically (metrics before chart if data is needed).\n"
-            "- Every step MUST include step_number, agent, objective, input_context, success_criteria.\n"
-            "- step_number must start at 1 and increment by 1.\n"
-            "- Be explicit: describe the precise data or chart requirements in the objective and context.\n\n"
-            "Return JSON that matches this template exactly:\n"
-            "{\n"
-            "  \"summary\": \"High-level plan\",\n"
-            "  \"steps\": [\n"
-            "    {\n"
-            "      \"step_number\": 1,\n"
-            "      \"agent\": \"metrics_agent\",\n"
-            "      \"objective\": \"What this step accomplishes\",\n"
-            "      \"input_context\": \"Details the agent needs\",\n"
-            "      \"success_criteria\": \"How we know the step succeeded\"\n"
-            "    },\n"
-            "    {\n"
-            "      \"step_number\": 2,\n"
-            "      \"agent\": \"chart_agent\",\n"
-            "      \"objective\": \"Visualization goal\",\n"
-            "      \"input_context\": \"Which fields to chart, formats, etc.\",\n"
-            "      \"success_criteria\": \"Chart characteristics\"\n"
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
-            "Available agents:\n"
-            f"{AVAILABLE_AGENTS}"
-        )
+
+def _resolve_window_hours(user_msg: str, clar: ClarificationState) -> int:
+    hints = clar.get("hints", {}) if clar else {}
+    return (
+        extract_window_from_hints(hints)
+        or extract_window_hours_from_text(user_msg)
+        or DEFAULT_DIAGNOSTIC_WINDOW_HOURS
     )
 
-    planner_llm = llm.with_structured_output(PlannerResponse)
-    messages = [system] + state["messages"]
 
-    try:
-        response = planner_llm.invoke(messages)
-        plan_steps = [step.model_dump() for step in response.steps]
-        plan_text = _format_plan_text(response.summary, response.steps)
-    except Exception as exc:
-        plan_steps = _default_plan(state)
-        plan_text = (
-            "Planner encountered an error and is falling back to a default plan.\n"
-            f"Error: {exc}\n\n"
-            "Default plan:\n"
-            + "\n".join(
-                f"{step['step_number']}. [{step['agent']}] {step['objective']}"
-                for step in plan_steps
+def make_diagnostics_plan(
+    user_msg: str,
+    clar: ClarificationState,
+    prev_context: Dict[str, int],
+) -> Tuple[PlannerResponse, Dict[str, int]]:
+    """Deterministic plan skeleton for diagnostics mode."""
+    window_hours = prev_context.get("recent_window_hours") or _resolve_window_hours(user_msg, clar)
+    target_metric = prev_context.get("target_metric") or infer_target_metric(user_msg)
+    baseline_hours = prev_context.get("baseline_window_hours", window_hours)
+    recent_hours = prev_context.get("recent_window_hours", window_hours)
+
+    steps: List[PlanStep] = []
+    for idx, spec in enumerate(DIAGNOSTICS_STEP_SPECS, start=1):
+        objective = spec["objective_template"].format(
+            metric=target_metric,
+            baseline_hours=baseline_hours,
+            recent_hours=recent_hours,
+        )
+        if spec["agent"] == "metrics_agent":
+            input_context = {
+                "metric": target_metric,
+                "mode": spec.get("mode", "overall"),
+                "baseline_hours": baseline_hours,
+                "recent_hours": recent_hours,
+            }
+        else:
+            input_context = {}
+        steps.append(
+            PlanStep(
+                step_number=idx,
+                name=spec.get("name"),
+                agent=spec["agent"],
+                objective=objective,
+                input_context=input_context,
+                success_criteria=spec["success"],
             )
         )
+
+    plan = PlannerResponse(
+        summary=f"Root-cause diagnostics plan for {target_metric}",
+        analysis_type="diagnostics",
+        steps=steps,
+    )
+    diag_context = {
+        "target_metric": target_metric,
+        "baseline_window_hours": baseline_hours,
+        "recent_window_hours": recent_hours,
+    }
+    return plan, diag_context
+
+
+def planner_agent_node(state: ObsState, llm) -> ObsState:
+    """Create a plan describing which agents should run and in what order."""
+    plan_mode = state.get("plan_mode", "default")
+
+    if plan_mode == "diagnostics":
+        user_text = _latest_user_text(state)
+        clar_state = state.get("clarification", {"status": "none"})
+        diag_context = state.get("diagnostics_context", {})
+        response, diag_updates = make_diagnostics_plan(user_text, clar_state, diag_context)
+        plan_steps = [step.model_dump() for step in response.steps]
+        plan_text = _format_plan_text(response.summary, response.steps)
+        diagnostics_context = {**diag_context, **diag_updates, "results": []}
+    else:
+        system = SystemMessage(
+            content=(
+                "You are a planning agent for an observability analytics assistant.\n"
+                "Break the user's goal into clear steps using the available agents.\n"
+                "Rules:\n"
+                "- Only use these agents: metrics_agent, chart_agent.\n"
+                "- metrics_agent already knows how to fetch schema, run SQL, and prepare chart data.\n"
+                "- chart_agent relies on the latest rows/chart context produced by metrics_agent.\n"
+                "- Always order steps logically (metrics before chart if data is needed).\n"
+                "- Every step MUST include step_number, agent, objective, input_context, success_criteria.\n"
+                "- step_number must start at 1 and increment by 1.\n"
+                "- Be explicit: describe the precise data or chart requirements in the objective and context.\n\n"
+                "Return JSON that matches this template exactly:\n"
+                "{\n"
+                "  \"summary\": \"High-level plan\",\n"
+                "  \"steps\": [\n"
+                "    {\n"
+                "      \"step_number\": 1,\n"
+                "      \"agent\": \"metrics_agent\",\n"
+                "      \"objective\": \"What this step accomplishes\",\n"
+                "      \"input_context\": \"Details the agent needs\",\n"
+                "      \"success_criteria\": \"How we know the step succeeded\"\n"
+                "    },\n"
+                "    {\n"
+                "      \"step_number\": 2,\n"
+                "      \"agent\": \"chart_agent\",\n"
+                "      \"objective\": \"Visualization goal\",\n"
+                "      \"input_context\": \"Which fields to chart, formats, etc.\",\n"
+                "      \"success_criteria\": \"Chart characteristics\"\n"
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "Available agents:\n"
+                f"{AVAILABLE_AGENTS}"
+            )
+        )
+
+        planner_llm = llm.with_structured_output(PlannerResponse)
+        messages = [system] + state["messages"]
+
+        try:
+            response = planner_llm.invoke(messages)
+            plan_steps = [step.model_dump() for step in response.steps]
+            plan_text = _format_plan_text(response.summary, response.steps)
+        except Exception as exc:
+            plan_steps = _default_plan(state)
+            plan_text = (
+                "Planner encountered an error and is falling back to a default plan.\n"
+                f"Error: {exc}\n\n"
+                "Default plan:\n"
+                + "\n".join(
+                    f"{step['step_number']}. [{step['agent']}] {step['objective']}"
+                    for step in plan_steps
+                )
+            )
+        diagnostics_context = state.get("diagnostics_context", {"results": []})
 
     if not plan_steps:
         plan_steps = _default_plan(state)
@@ -161,4 +246,6 @@ def planner_agent_node(state: ObsState, llm) -> ObsState:
         ),
         "plan": plan_steps,
         "plan_step_index": 0,
+        "diagnostics_context": diagnostics_context,
+        "plan_mode": plan_mode,
     }

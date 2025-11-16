@@ -38,6 +38,9 @@ def run_obs_agent(
             "chart_context": {"rows": [], "metadata": {}},
             "plan": [],
             "plan_step_index": 0,
+            "clarification": {"status": "none"},
+            "plan_mode": "default",
+            "diagnostics_context": {"results": []},
         }
     else:
         # 이전 대화에 새로운 user message 추가
@@ -48,6 +51,9 @@ def run_obs_agent(
             "chart_context": prev_state.get("chart_context", {"rows": prev_state.get("last_rows", []), "metadata": {}}),
             "plan": [],
             "plan_step_index": 0,
+            "clarification": prev_state.get("clarification", {"status": "none"}),
+            "plan_mode": prev_state.get("plan_mode", "default"),
+            "diagnostics_context": prev_state.get("diagnostics_context", {"results": []}),
         }
 
     final_state: Optional[ObsState] = None

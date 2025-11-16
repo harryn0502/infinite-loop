@@ -8,6 +8,9 @@ from ..agents.router import router_agent_node
 from ..agents.metrics import metrics_agent_node
 from ..agents.chart import chart_agent_node
 from ..agents.planner import planner_agent_node
+from ..agents.clarifier import clarifier_agent_node
+from ..agents.diagnostics_summary import diagnostics_summary_agent_node
+from ..agents.refusal import refusal_agent_node
 
 
 def build_graph(llm):
@@ -17,8 +20,10 @@ def build_graph(llm):
     Creates a multi-agent system with:
     - Planner: Breaks down user intent into steps
     - Router: Executes each plan step in sequence
+    - Clarifier: Asks follow-up questions for ambiguous queries
     - Metrics Agent: Handles analytics and Text2SQL queries
     - Chart Agent: Generates visualization specifications
+    - Diagnostics Summary Agent: Explains root causes from diagnostics context
 
     Args:
         llm: Language model instance to use for all agents
@@ -33,12 +38,18 @@ def build_graph(llm):
     router_node = partial(router_agent_node, llm=llm)
     metrics_node = partial(metrics_agent_node, llm=llm)
     chart_node = partial(chart_agent_node, llm=llm)
+    clarifier_node = partial(clarifier_agent_node, llm=llm)
+    diagnostics_node = partial(diagnostics_summary_agent_node, llm=llm)
+    refusal_node = partial(refusal_agent_node, llm=llm)
 
     # Add nodes
     workflow.add_node("planner", planner_node)
     workflow.add_node("router", router_node)
     workflow.add_node("metrics_agent", metrics_node)
     workflow.add_node("chart_agent", chart_node)
+    workflow.add_node("clarifier_agent", clarifier_node)
+    workflow.add_node("diagnostics_summary_agent", diagnostics_node)
+    workflow.add_node("refusal_agent", refusal_node)
 
     # Add edges
     workflow.add_edge(START, "router")
@@ -47,7 +58,13 @@ def build_graph(llm):
     def route_from_state(state: ObsState) -> str:
         plan = state.get("plan", []) or []
         idx = state.get("plan_step_index", 0)
-        valid_agents = {"metrics_agent", "chart_agent"}
+        valid_agents = {
+            "metrics_agent",
+            "chart_agent",
+            "clarifier_agent",
+            "diagnostics_summary_agent",
+            "refusal_agent",
+        }
 
         if plan and idx < len(plan):
             agent = plan[idx].get("agent", "metrics_agent")
@@ -73,11 +90,17 @@ def build_graph(llm):
             "planner": "planner",
             "metrics_agent": "metrics_agent",
             "chart_agent": "chart_agent",
+            "clarifier_agent": "clarifier_agent",
+            "diagnostics_summary_agent": "diagnostics_summary_agent",
+            "refusal_agent": "refusal_agent",
             "complete": END,
         },
     )
 
     workflow.add_edge("metrics_agent", "router")
     workflow.add_edge("chart_agent", "router")
+    workflow.add_edge("clarifier_agent", "router")
+    workflow.add_edge("diagnostics_summary_agent", "router")
+    workflow.add_edge("refusal_agent", "router")
 
     return workflow.compile()
