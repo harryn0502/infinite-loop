@@ -3,7 +3,7 @@
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from ..core.state import ObsState, AgentName
 from ..core.state_utils import agent_state_update
@@ -38,6 +38,12 @@ ANALYTICS_KEYWORDS = [
     "graph",
     "observability",
 ]
+
+REFUSAL_MESSAGE = (
+    "I cannot help with this request as it is either unrelated to observability analysis "
+    "or could potentially harm the system. If you need token/metrics/chart analysis, "
+    "please be specific about your requirements."
+)
 
 
 class RoutingDecision(BaseModel):
@@ -164,31 +170,32 @@ Return your decision with reasoning."""
         return "metrics_agent"
 
 
-def route_from_user_message(state: ObsState, llm) -> AgentName:
+def route_from_user_message(state: ObsState, llm) -> tuple[AgentName, Optional[AIMessage]]:
     """
-    Route initial user message across refusal/diagnostics/planner/metrics/chart agents.
+    Route initial user message across diagnostics/planner/metrics/chart agents.
+    Returns tuple of (agent_name, optional_refusal_message).
     """
     last_user_msg = _extract_last_user_message(state)
     if not last_user_msg:
         print("⚠️  No user message found, defaulting to metrics_agent")
-        return "metrics_agent"
+        return "metrics_agent", None
 
     user_text = last_user_msg.content if isinstance(last_user_msg.content, str) else ""
     if not user_text:
-        return "metrics_agent"
+        return "metrics_agent", None
 
     if _is_disallowed_request(user_text):
-        print("🧭 Routing: refusal_agent (disallowed request detected)")
-        return "refusal_agent"
+        print("🚫 Router: Disallowed request detected, refusing")
+        return "complete", AIMessage(content=REFUSAL_MESSAGE)
 
     if not _is_analytics_request(user_text):
-        print("🧭 Routing: refusal_agent (irrelevant request detected)")
-        return "refusal_agent"
+        print("🚫 Router: Irrelevant request detected, refusing")
+        return "complete", AIMessage(content=REFUSAL_MESSAGE)
 
     if _enter_diagnostics_mode(state, user_text):
-        return "planner"
+        return "planner", None
 
-    return _route_default_flow(state, llm, user_text)
+    return _route_default_flow(state, llm, user_text), None
 
 
 def router_agent_node(state: ObsState, llm) -> ObsState:
@@ -209,6 +216,7 @@ def router_agent_node(state: ObsState, llm) -> ObsState:
 
     plan_steps = state.get("plan", []) or []
     step_index = state.get("plan_step_index", 0)
+    refusal_message = None
 
     if plan_steps and step_index < len(plan_steps):
         step = plan_steps[step_index]
@@ -237,13 +245,13 @@ def router_agent_node(state: ObsState, llm) -> ObsState:
             plan_mode="default",
         )
     else:
-        agent_name = route_from_user_message(state, llm)
+        agent_name, refusal_message = route_from_user_message(state, llm)
         plan_steps = state.get("plan", []) or []
         step_index = state.get("plan_step_index", 0)
 
     return agent_state_update(
         state,
-        messages=[],
+        messages=[refusal_message] if refusal_message else [],
         active_agent=agent_name,
         plan=plan_steps,
         plan_step_index=step_index,

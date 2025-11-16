@@ -9,7 +9,6 @@ from ..agents.metrics import metrics_agent_node
 from ..agents.chart import chart_agent_node
 from ..agents.planner import planner_agent_node
 from ..agents.diagnostics_summary import diagnostics_summary_agent_node
-from ..agents.refusal import refusal_agent_node
 
 
 def build_graph(llm):
@@ -18,7 +17,7 @@ def build_graph(llm):
 
     Creates a multi-agent system with:
     - Planner: Breaks down user intent into steps
-    - Router: Executes each plan step in sequence
+    - Router: Executes each plan step in sequence (also handles refusals)
     - Metrics Agent: Handles analytics and Text2SQL queries
     - Chart Agent: Generates visualization specifications
     - Diagnostics Summary Agent: Explains root causes from diagnostics context
@@ -37,7 +36,6 @@ def build_graph(llm):
     metrics_node = partial(metrics_agent_node, llm=llm)
     chart_node = partial(chart_agent_node, llm=llm)
     diagnostics_node = partial(diagnostics_summary_agent_node, llm=llm)
-    refusal_node = partial(refusal_agent_node, llm=llm)
 
     # Add nodes
     workflow.add_node("planner", planner_node)
@@ -45,7 +43,6 @@ def build_graph(llm):
     workflow.add_node("metrics_agent", metrics_node)
     workflow.add_node("chart_agent", chart_node)
     workflow.add_node("diagnostics_summary_agent", diagnostics_node)
-    workflow.add_node("refusal_agent", refusal_node)
 
     # Add edges
     workflow.add_edge(START, "router")
@@ -58,7 +55,6 @@ def build_graph(llm):
             "metrics_agent",
             "chart_agent",
             "diagnostics_summary_agent",
-            "refusal_agent",
         }
 
         if plan and idx < len(plan):
@@ -86,7 +82,6 @@ def build_graph(llm):
             "metrics_agent": "metrics_agent",
             "chart_agent": "chart_agent",
             "diagnostics_summary_agent": "diagnostics_summary_agent",
-            "refusal_agent": "refusal_agent",
             "complete": END,
         },
     )
@@ -94,6 +89,5 @@ def build_graph(llm):
     workflow.add_edge("metrics_agent", "router")
     workflow.add_edge("chart_agent", "router")
     workflow.add_edge("diagnostics_summary_agent", "router")
-    workflow.add_edge("refusal_agent", "router")
 
     return workflow.compile()
