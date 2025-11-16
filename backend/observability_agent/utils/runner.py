@@ -39,6 +39,7 @@ def run_obs_agent(
             "plan_step_index": 0,
             "plan_mode": "default",
             "diagnostics_context": {"results": []},
+            "has_error": False,
         }
     else:
         # Add new user message to previous conversation
@@ -50,6 +51,7 @@ def run_obs_agent(
             "plan_step_index": 0,
             "plan_mode": prev_state.get("plan_mode", "default"),
             "diagnostics_context": prev_state.get("diagnostics_context", {"results": []}),
+            "has_error": False,
         }
 
     final_state: Optional[ObsState] = None

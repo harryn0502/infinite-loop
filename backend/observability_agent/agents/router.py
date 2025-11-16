@@ -195,6 +195,18 @@ def router_agent_node(state: ObsState, llm) -> ObsState:
     """
     LLM-based router agent that intelligently determines which agent to use.
     """
+    # Check if previous agent encountered a fatal error
+    if state.get("has_error", False):
+        print("⚠️  Fatal error detected, stopping execution")
+        return agent_state_update(
+            state,
+            messages=[],
+            active_agent="complete",
+            plan=[],
+            plan_step_index=0,
+            plan_mode="default",
+        )
+
     plan_steps = state.get("plan", []) or []
     step_index = state.get("plan_step_index", 0)
 

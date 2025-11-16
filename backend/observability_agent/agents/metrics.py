@@ -227,7 +227,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
         }
         error_msg = AIMessage(
             content=(
-                "I attempted multiple fixes but the database continues to reject the SQL:\n\n"
+                "❌ SQL execution failed after 3 attempts.\n\n"
                 f"```sql\n{sql}\n```\n\n"
                 f"Error details: {last_error}\n\n"
                 "Please adjust the question or try a simpler aggregation."
@@ -242,6 +242,7 @@ def metrics_agent_node(state: ObsState, llm, config: Optional[RunnableConfig] = 
             active_agent="metrics_agent",
             plan=plan_steps,
             plan_step_index=plan_index + 1,
+            has_error=True,
         )
 
     # Convert rows to dict list and store in state

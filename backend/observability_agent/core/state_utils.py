@@ -31,6 +31,7 @@ def agent_state_update(
         "plan_step_index": state.get("plan_step_index", 0),
         "plan_mode": state.get("plan_mode", "default"),
         "diagnostics_context": state.get("diagnostics_context", {"results": []}),
+        "has_error": state.get("has_error", False),
     }
     response.update(updates)
     return response

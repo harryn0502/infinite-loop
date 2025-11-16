@@ -34,6 +34,7 @@ class ObsState(TypedDict):
         plan_step_index: Current step index within the plan
         plan_mode: Current planner mode ("default" vs "diagnostics")
         diagnostics_context: Aggregated diagnostics results
+        has_error: Whether a fatal error occurred (stops execution)
     """
 
     # LangGraph basic messages (using add_messages reducer)
@@ -48,6 +49,7 @@ class ObsState(TypedDict):
     plan_step_index: int
     plan_mode: Literal["default", "diagnostics"]
     diagnostics_context: DiagnosticsContext
+    has_error: bool
 
 
 # Agent name type for routing (planner is routed explicitly)

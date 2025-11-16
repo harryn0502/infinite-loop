@@ -236,4 +236,5 @@ def planner_agent_node(state: ObsState, llm) -> ObsState:
         "plan_step_index": 0,
         "diagnostics_context": diagnostics_context,
         "plan_mode": plan_mode,
+        "has_error": False,
     }
