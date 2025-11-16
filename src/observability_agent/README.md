@@ -4,17 +4,16 @@ A modular multi-agent system for observability analytics, built with LangGraph.
 
 ## Features
 
+- **Planner Agent**: Breaks complex user objectives into actionable steps
 - **Metrics Agent**: Text2SQL analytics for querying observability data
-- **Row Explorer Agent**: Browse and inspect specific data rows
-- **Replay Agent**: Re-run previous agent executions
-- **Chart Agent**: Generate visualization specifications
+- **Chart Agent**: Generate visualization specifications from recent queries
 
 ## Architecture
 
 ```
 observability_agent/
-├── core/           # State, routing, and graph workflow
-├── agents/         # Agent implementations (metrics, row, replay, chart)
+├── core/           # Planner, routing, and graph workflow
+├── agents/         # Agent implementations (planner, metrics, chart)
 ├── tools/          # Database and API integrations
 └── utils/          # Helper utilities (SQL parsing, runner)
 ```
@@ -37,7 +36,7 @@ state = run_obs_agent(
 
 # Continue conversation
 state = run_obs_agent(
-    "Replay the second row",
+    "Create a chart of those results",
     app,
     prev_state=state
 )
@@ -51,15 +50,13 @@ state = run_obs_agent(
 - `graph.py`: LangGraph workflow assembly
 
 ### Agents (`agents/`)
+- `planner.py`: Multi-step planning agent
 - `metrics.py`: Text2SQL metrics agent
-- `row_explorer.py`: Row listing and exploration
-- `replay.py`: Agent run replay
 - `chart.py`: Visualization generation
 
 ### Tools (`tools/`)
 - `schema.py`: Database schema definition
-- `database.py`: SQL execution (stub)
-- `replay_api.py`: Replay API integration (stub)
+- `database.py`: SQL execution helper
 
 ### Utils (`utils/`)
 - `sql_parser.py`: Extract SQL from LLM responses
@@ -69,7 +66,7 @@ state = run_obs_agent(
 
 ### Replace Stub Tools
 
-The database and replay tools are currently stubs. Replace them with real implementations:
+The bundled SQLite helper is intentionally simple. Replace it with your production data source:
 
 ```python
 # tools/database.py
@@ -81,13 +78,6 @@ def run_sql(sql: str) -> Dict[str, Any]:
     cursor.execute(sql)
     # ... return results
 ```
-
-### Add New Agents
-
-1. Create agent file in `agents/`
-2. Add routing logic in `core/router.py`
-3. Register in `core/graph.py`
-4. Export from `agents/__init__.py`
 
 ### Enhance Routing
 

@@ -10,7 +10,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from observability_agent import build_graph, run_obs_agent
+from src.observability_agent import build_graph, run_obs_agent
 from tutorials.holistic_ai_bedrock import get_chat_model
 
 
@@ -41,17 +41,9 @@ def main():
         prev_state=state1
     )
 
-    # Example 3: Replay
-    print("\n[Example 3] Replay request")
+    # Example 3: Chart generation
+    print("\n[Example 3] Chart visualization")
     state3 = run_obs_agent(
-        "두 번째 row 다시 replay해줘.",
-        app,
-        prev_state=state2
-    )
-
-    # Example 4: Chart generation
-    print("\n[Example 4] Chart visualization")
-    state4 = run_obs_agent(
         "지금 데이터로 tool별 평균 latency bar chart 그려줘.",
         app,
         prev_state=state2

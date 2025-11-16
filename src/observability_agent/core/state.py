@@ -12,7 +12,10 @@ class ObsState(TypedDict):
     Attributes:
         messages: LangGraph message list with add_messages reducer
         active_agent: Currently active agent name (for debugging/logging)
-        last_rows: Recent SQL result rows for replay and chart generation
+        last_rows: Recent SQL result rows for follow-up questions and chart generation
+        chart_context: Prepared chart rows + metadata
+        plan: Planner output steps
+        plan_step_index: Current step index within the plan
     """
     # LangGraph basic messages (add_messages reducer 사용)
     messages: Annotated[List[AnyMessage], add_messages]
@@ -20,9 +23,12 @@ class ObsState(TypedDict):
     # 현재 어떤 agent가 일하는 중인지 (디버깅/로그용)
     active_agent: str
 
-    # 최근 SQL 결과 row를 저장해서 "2번째 row replay" 같은 요청에 사용
+    # 최근 SQL 결과 row를 저장해서 후속 질문 시 참조
     last_rows: List[Dict[str, Any]]  # [{"run_id": "...", "latency_ms": ...}, ...]
+    chart_context: Dict[str, Any]
+    plan: List[Dict[str, Any]]
+    plan_step_index: int
 
 
-# Agent name type for routing
-AgentName = Literal["metrics_agent", "row_agent", "replay_agent", "chart_agent"]
+# Agent name type for routing (planner is routed explicitly)
+AgentName = Literal["planner", "metrics_agent", "chart_agent", "complete"]

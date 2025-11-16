@@ -1,8 +1,13 @@
 """Chart/visualization agent for creating data visualizations."""
 
+import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ..core.state import ObsState
+from ..tools import prepare_chart_data_tool
+from .schemas import ChartSpecResponse
+
+MAX_METADATA_ROWS = 20
 
 
 def chart_agent_node(state: ObsState, llm) -> ObsState:
@@ -24,8 +29,21 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
     Returns:
         Updated state with chart specification
     """
-    last_rows = state.get("last_rows", [])
+    chart_context = state.get("chart_context", {"rows": state.get("last_rows", []), "metadata": {}})
+    raw_rows = chart_context.get("raw_rows") or state.get("last_rows", [])
+    last_rows = raw_rows or chart_context.get("rows") or state.get("last_rows", [])
+    chart_meta = chart_context.get("metadata", {})
     user_message = state["messages"][-1]
+    plan_steps = state.get("plan", []) or []
+    plan_index = state.get("plan_step_index", 0)
+    planner_step = plan_steps[plan_index] if plan_steps and plan_index < len(plan_steps) else None
+    planner_instruction = ""
+    if planner_step:
+        planner_instruction = (
+            f"Planner objective: {planner_step.get('objective', '')}\n"
+            f"Context: {planner_step.get('input_context', '')}\n"
+            f"Success criteria: {planner_step.get('success_criteria', '')}"
+        )
 
     if not last_rows:
         msg = AIMessage(
@@ -39,7 +57,19 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
             "messages": [msg],
             "active_agent": "chart_agent",
             "last_rows": last_rows,
+            "chart_context": chart_context,
+            "plan": plan_steps,
+            "plan_step_index": plan_index + 1,
         }
+
+    if not chart_meta:
+        try:
+            chart_ready = prepare_chart_data_tool.invoke({"rows": last_rows})
+            last_rows = chart_ready["rows"]
+            chart_meta = chart_ready.get("metadata", {})
+            raw_rows = raw_rows or chart_ready.get("raw_rows", last_rows)
+        except Exception:
+            chart_meta = chart_meta or {}
 
     system = SystemMessage(
         content=(
@@ -47,32 +77,70 @@ def chart_agent_node(state: ObsState, llm) -> ObsState:
             "You will receive:\n"
             "1) The user's request for a chart.\n"
             "2) A list of data rows (JSON-like dicts).\n\n"
-            "Your job:\n"
-            "- Decide an appropriate chart type (bar, line, etc.).\n"
-            "- Suggest xField and yField.\n"
-            "- Output a JSON spec that a frontend can use to render the chart.\n"
-            "- You MUST respond with a JSON object inside a ```json ... ``` block.\n"
-            "The JSON spec must have at least:\n"
-            """{\n"
-            '  \"chartType\": \"bar\" | \"line\" | \"scatter\",\n'
-            '  \"xField\": \"...\",\n'
-            '  \"yField\": \"...\",\n'
-            '  \"data\": [ {\"field1\": ..., \"field2\": ...}, ... ]\n"
-            "}\n"""
+            "Return a structured response with:\n"
+            "- chart_type: The type of chart (bar, line, scatter, pie, etc.)\n"
+            "- x_field: The field name to use for x-axis\n"
+            "- y_field: The field name to use for y-axis\n"
+            "- data: The data rows to visualize (same as input)\n"
+            "- reasoning: Brief explanation of why this chart type and fields were chosen"
         )
     )
 
-    helper_user = HumanMessage(
-        content=(
-            f"User request: {user_message.content}\n\n"
-            f"Data rows: {last_rows}"
-        )
+    helper_content = (
+        f"User request: {user_message.content}\n\n"
+        f"Prepared data rows: {last_rows}\n\n"
+        f"Chart metadata: {chart_meta}"
+    )
+    if planner_instruction:
+        helper_content += f"\n\nPlanner guidance:\n{planner_instruction}"
+
+    helper_user = HumanMessage(content=helper_content)
+
+    llm_with_structure = llm.with_structured_output(ChartSpecResponse)
+    chart_response = llm_with_structure.invoke([system, helper_user])
+
+    # Create JSON spec for frontend
+    chart_data = chart_response.data or last_rows
+    reasoning_text = chart_response.reasoning or "Model did not provide a detailed explanation."
+    label_field = chart_response.x_field or chart_meta.get("label_field", "label")
+    value_field = chart_response.y_field or chart_meta.get("value_field", "value")
+    chart_type = chart_response.chart_type or chart_meta.get("suggested_chart", "bar")
+    chart_spec = {
+        "chartType": chart_type,
+        "xField": label_field,
+        "yField": value_field,
+        "data": chart_data
+    }
+
+    chart_metadata = {
+        "agent": "chart_agent",
+        "chart_spec": chart_spec,
+        "rows_preview": chart_data[:MAX_METADATA_ROWS],
+        "row_count": len(chart_data),
+        "user_request": user_message.content,
+        "source_metadata": chart_meta,
+    }
+
+    spec_msg = AIMessage(
+        content=f"**Reasoning:** {reasoning_text}\n\n```json\n{json.dumps(chart_spec, indent=2)}\n```",
+        additional_kwargs={
+            "reasoning": reasoning_text,
+            "chart_spec": chart_spec,
+            "agent_metadata": chart_metadata,
+        }
     )
 
-    spec_msg = llm.invoke([system, helper_user])
+    new_chart_context = {
+        "rows": chart_data,
+        "metadata": {**chart_meta, "chart_type": chart_type, "label_field": label_field, "value_field": value_field},
+        "raw_rows": raw_rows or chart_data,
+    }
 
     return {
         "messages": [spec_msg],
         "active_agent": "chart_agent",
-        "last_rows": last_rows,
+        "last_rows": raw_rows or state.get("last_rows", []),
+        "chart_context": new_chart_context,
+        "plan": plan_steps,
+        "plan_step_index": plan_index + 1,
     }

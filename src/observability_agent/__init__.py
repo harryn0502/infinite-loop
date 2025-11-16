@@ -4,7 +4,6 @@ Observability Agent - Multi-agent system for observability analytics.
 This package provides a modular multi-agent system for:
 - Text2SQL analytics queries
 - Row exploration and debugging
-- Agent run replay
 - Data visualization
 """
 

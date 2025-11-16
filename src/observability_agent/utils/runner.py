@@ -35,6 +35,9 @@ def run_obs_agent(
             "messages": [HumanMessage(content=user_message)],
             "active_agent": "router",
             "last_rows": [],
+            "chart_context": {"rows": [], "metadata": {}},
+            "plan": [],
+            "plan_step_index": 0,
         }
     else:
         # 이전 대화에 새로운 user message 추가
@@ -42,18 +45,36 @@ def run_obs_agent(
             "messages": prev_state["messages"] + [HumanMessage(content=user_message)],
             "active_agent": prev_state["active_agent"],
             "last_rows": prev_state.get("last_rows", []),
+            "chart_context": prev_state.get("chart_context", {"rows": prev_state.get("last_rows", []), "metadata": {}}),
+            "plan": [],
+            "plan_step_index": 0,
         }
 
     final_state: Optional[ObsState] = None
+    printed = len(state["messages"])
+
     for event in app.stream(state, stream_mode="values"):
         final_state = event
         messages = event["messages"]
         if not messages:
             continue
-        last = messages[-1]
-        if isinstance(last, AIMessage):
+
+        new_messages = messages[printed:]
+        printed = len(messages)
+
+        for msg in new_messages:
+            if not isinstance(msg, AIMessage):
+                continue
+
             print("\n=== Agent Response ===")
-            print(last.content)
+            print(msg.content)
+
+            meta = getattr(msg, "additional_kwargs", {})
+            reasoning = meta.get("reasoning")
+            content_text = msg.content if isinstance(msg.content, str) else ""
+            if reasoning and (not content_text or reasoning not in content_text):
+                print(f"\n💡 Reasoning: {reasoning}")
+
             print("======================")
 
     return final_state or state
